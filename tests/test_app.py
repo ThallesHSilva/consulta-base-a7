@@ -88,6 +88,50 @@ class AuthSecurityTest(unittest.TestCase):
         self.assertEqual(app.validate_password_strength("Senha1234"), "")
 
 
+class SessionCookieTest(unittest.TestCase):
+    def test_auto_secure_cookie_follows_request_proto(self):
+        self.assertTrue(app.secure_cookie_enabled("auto", "https"))
+        self.assertTrue(app.secure_cookie_enabled("", "https, http"))
+        self.assertFalse(app.secure_cookie_enabled("auto", "http"))
+
+    def test_explicit_secure_cookie_values(self):
+        self.assertTrue(app.secure_cookie_enabled("1", "http"))
+        self.assertTrue(app.secure_cookie_enabled("true", "http"))
+        self.assertFalse(app.secure_cookie_enabled("0", "https"))
+
+    def test_set_session_cookie_omits_secure_on_http_auto(self):
+        original_mode = app.SESSION_COOKIE_SECURE_MODE
+        app.SESSION_COOKIE_SECURE_MODE = "auto"
+        handler = object.__new__(app.ConsultaHandler)
+        handler.headers = {"X-Forwarded-Proto": "http"}
+        sent_headers = []
+        handler.send_header = lambda name, value: sent_headers.append((name, value))
+
+        try:
+            handler.set_session_cookie("abc")
+        finally:
+            app.SESSION_COOKIE_SECURE_MODE = original_mode
+
+        cookie = next(value for name, value in sent_headers if name == "Set-Cookie")
+        self.assertNotIn("; Secure", cookie)
+
+    def test_set_session_cookie_adds_secure_on_https_auto(self):
+        original_mode = app.SESSION_COOKIE_SECURE_MODE
+        app.SESSION_COOKIE_SECURE_MODE = "auto"
+        handler = object.__new__(app.ConsultaHandler)
+        handler.headers = {"X-Forwarded-Proto": "https"}
+        sent_headers = []
+        handler.send_header = lambda name, value: sent_headers.append((name, value))
+
+        try:
+            handler.set_session_cookie("abc")
+        finally:
+            app.SESSION_COOKIE_SECURE_MODE = original_mode
+
+        cookie = next(value for name, value in sent_headers if name == "Set-Cookie")
+        self.assertIn("; Secure", cookie)
+
+
 class PdfExportTest(unittest.TestCase):
     def test_simple_pdf_has_pdf_signature(self):
         pdf = app.build_simple_pdf(["Consulta Base", "Cliente: Teste"])

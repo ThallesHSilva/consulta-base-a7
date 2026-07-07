@@ -40,7 +40,7 @@ Variaveis recomendadas em producao:
 HOST=127.0.0.1
 PORT=8000
 PUBLIC_BASE_URL=https://seu-dominio.com.br
-SESSION_COOKIE_SECURE=1
+SESSION_COOKIE_SECURE=auto
 MAX_UPLOAD_BYTES=314572800
 APP_TIMEZONE=America/Sao_Paulo
 ADMIN_EMAIL=admin@seu-dominio.com.br
@@ -59,7 +59,8 @@ Observacoes importantes:
 - Se usar Nginx como proxy reverso, mantenha `HOST=127.0.0.1` e exponha somente o Nginx para a internet.
 - Se for expor a aplicacao diretamente sem Nginx, use `HOST=0.0.0.0`, mas o recomendado e usar Nginx com HTTPS.
 - Configure `PUBLIC_BASE_URL` para que os links de redefinicao de senha saiam com o dominio correto.
-- Use `SESSION_COOKIE_SECURE=1` somente quando o acesso externo estiver em HTTPS.
+- Use `SESSION_COOKIE_SECURE=auto` para que o cookie de sessao use `Secure` somente quando a requisicao chegar como HTTPS via `X-Forwarded-Proto`.
+- Use `SESSION_COOKIE_SECURE=1` apenas quando todo acesso estiver em HTTPS. Em teste por HTTP direto, use `auto` ou `0`.
 - O painel administrativo possui upload semanal dos CSVs em `POST /api/admin/data/upload`; o envio exige usuario `ADMIN`.
 - `MAX_UPLOAD_BYTES` define o limite do endpoint de upload. O padrao e 300 MB.
 - `APP_TIMEZONE` define o fuso usado nos relatorios diarios e mensais. O padrao e `America/Sao_Paulo`.
@@ -79,7 +80,7 @@ WorkingDirectory=/opt/consulta-base
 Environment=HOST=127.0.0.1
 Environment=PORT=8000
 Environment=PUBLIC_BASE_URL=https://seu-dominio.com.br
-Environment=SESSION_COOKIE_SECURE=1
+Environment=SESSION_COOKIE_SECURE=auto
 Environment=MAX_UPLOAD_BYTES=314572800
 Environment=APP_TIMEZONE=America/Sao_Paulo
 Environment=ADMIN_EMAIL=admin@seu-dominio.com.br

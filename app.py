@@ -44,6 +44,7 @@ PASSWORD_RESET_IP_LIMIT = 10
 PASSWORD_HASH_ITERATIONS = 260_000
 AUTH_STATUSES = {"PENDENTE_APROVACAO", "ATIVO", "BLOQUEADO", "CANCELADO"}
 AUTH_PROFILES = {"ADMIN", "USUARIO"}
+TRUE_ENV_VALUES = {"1", "true", "sim", "yes", "on"}
 GENERIC_RESET_MESSAGE = (
     "Se o e-mail estiver cadastrado, enviaremos as instruções para redefinição de senha."
 )
@@ -51,13 +52,7 @@ DB_TIMEOUT_SECONDS = 30
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(300 * 1024 * 1024)))
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "America/Sao_Paulo")
-SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {
-    "1",
-    "true",
-    "sim",
-    "yes",
-    "on",
-}
+SESSION_COOKIE_SECURE_MODE = os.environ.get("SESSION_COOKIE_SECURE", "auto").strip().lower() or "auto"
 
 DATA_FILES = [
     {
@@ -227,6 +222,14 @@ def clean_cell(value: Any) -> str:
     if value is None:
         return ""
     return str(value).replace("\x00", "").strip()
+
+
+def secure_cookie_enabled(mode: Any, proto: Any) -> bool:
+    normalized_mode = str(mode or "").strip().lower()
+    if normalized_mode in {"", "auto"}:
+        normalized_proto = str(proto or "").split(",", 1)[0].strip().lower()
+        return normalized_proto == "https"
+    return normalized_mode in TRUE_ENV_VALUES
 
 
 def cnpj_digits(value: Any) -> str:
@@ -2109,12 +2112,18 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
     def user_agent(self) -> str:
         return self.headers.get("User-Agent", "")[:500]
 
+    def request_proto(self) -> str:
+        proto = self.headers.get("X-Forwarded-Proto") or "http"
+        return proto.split(",", 1)[0].strip().lower()
+
+    def should_use_secure_cookie(self) -> bool:
+        return secure_cookie_enabled(SESSION_COOKIE_SECURE_MODE, self.request_proto())
+
     def base_url(self) -> str:
         if PUBLIC_BASE_URL:
             return PUBLIC_BASE_URL
         host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "127.0.0.1:8000"
-        proto = self.headers.get("X-Forwarded-Proto") or "http"
-        proto = proto.split(",", 1)[0].strip()
+        proto = self.request_proto()
         return f"{proto}://{host}".rstrip("/")
 
     def read_json_body(self) -> dict[str, Any]:
@@ -2158,7 +2167,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
 
     def set_session_cookie(self, token: str) -> None:
         max_age = SESSION_DURATION_HOURS * 60 * 60
-        secure = "; Secure" if SESSION_COOKIE_SECURE else ""
+        secure = "; Secure" if self.should_use_secure_cookie() else ""
         self.send_header(
             "Set-Cookie",
             (
@@ -2168,7 +2177,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         )
 
     def clear_session_cookie(self) -> None:
-        secure = "; Secure" if SESSION_COOKIE_SECURE else ""
+        secure = "; Secure" if self.should_use_secure_cookie() else ""
         self.send_header(
             "Set-Cookie",
             f"{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0{secure}",

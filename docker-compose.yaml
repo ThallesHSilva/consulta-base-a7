@@ -11,8 +11,8 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - APP_TIMEZONE=America/Sao_Paulo
-      - SESSION_COOKIE_SECURE=1
-      - PUBLIC_BASE_URL=https://seudominio.com.br
+      - SESSION_COOKIE_SECURE=auto
+      - PUBLIC_BASE_URL=
       - ADMIN_EMAIL=
       - ADMIN_NAME=
       - ADMIN_PASSWORD=
