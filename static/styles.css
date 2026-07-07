@@ -1368,6 +1368,78 @@ svg rect {
   padding: 1.2rem;
 }
 
+.data-upload-panel {
+  padding: 1.35rem;
+}
+
+.data-upload-form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.upload-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.file-upload {
+  display: grid;
+  gap: 0.55rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  padding: 1rem;
+  background: #fbfcff;
+  color: #343b55;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.file-upload input {
+  width: 100%;
+  color: #596077;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.upload-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: center;
+}
+
+.upload-actions .auth-message {
+  min-height: 3rem;
+}
+
+.upload-summary {
+  display: grid;
+  gap: 0.7rem;
+  margin-top: 1rem;
+  border: 1px solid rgba(22, 163, 74, 0.16);
+  border-radius: 14px;
+  padding: 1rem;
+  background: var(--green-soft);
+  color: #166534;
+}
+
+.upload-summary strong {
+  color: #14532d;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+}
+
+.upload-summary ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .admin-panel {
   padding: 1.35rem;
 }
@@ -1619,6 +1691,11 @@ svg rect {
   }
 
   .admin-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .upload-grid,
+  .upload-actions {
     grid-template-columns: 1fr;
   }
 

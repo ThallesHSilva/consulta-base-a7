@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -16,6 +17,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from email.message import EmailMessage
+from email.parser import BytesParser
+from email.policy import default as email_policy
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -44,6 +47,7 @@ GENERIC_RESET_MESSAGE = (
     "Se o e-mail estiver cadastrado, enviaremos as instruções para redefinição de senha."
 )
 DB_TIMEOUT_SECONDS = 30
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(300 * 1024 * 1024)))
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {
     "1",
@@ -76,6 +80,7 @@ DATA_FILES = [
         "cliente_columns": ["NM_CLIENTE", "CLIENTE"],
     },
 ]
+DATA_FILE_BY_KEY = {data_file["key"]: data_file for data_file in DATA_FILES}
 
 APP_STATE: dict[str, Any] = {
     "ready": False,
@@ -337,6 +342,158 @@ def iter_csv_rows(path: Path):
                     key = f"EXTRA_{index - len(headers) + 1}"
                 record[key] = clean_cell(value)
             yield row_number, record
+
+
+def detect_upload_encoding(content: bytes) -> str:
+    sample = content[:65536]
+    try:
+        sample.decode("utf-8-sig")
+        return "utf-8-sig"
+    except UnicodeDecodeError:
+        return "cp1252"
+
+
+def validate_uploaded_csv_headers(content: bytes, data_file: dict[str, Any]) -> list[str]:
+    if not content:
+        raise ValueError("O arquivo enviado está vazio.")
+
+    encoding = detect_upload_encoding(content)
+    text = content[:65536].decode(encoding, errors="replace")
+    reader = csv.reader(io.StringIO(text), delimiter=";")
+    try:
+        headers = sanitize_headers(next(reader))
+    except StopIteration as exc:
+        raise ValueError("O arquivo enviado está vazio.") from exc
+
+    expected_columns = data_file["cnpj_columns"]
+    if not any(column in headers for column in expected_columns):
+        expected = ", ".join(expected_columns)
+        raise ValueError(
+            f"O arquivo {data_file['label']} deve conter a coluna {expected}."
+        )
+    return headers
+
+
+def parse_multipart_form(content_type: str, body: bytes) -> list[dict[str, Any]]:
+    if "multipart/form-data" not in content_type.lower():
+        raise ValueError("Envie os arquivos usando multipart/form-data.")
+
+    message_bytes = (
+        f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8")
+        + body
+    )
+    message = BytesParser(policy=email_policy).parsebytes(message_bytes)
+    if not message.is_multipart():
+        raise ValueError("Requisição de upload inválida.")
+
+    parts = []
+    for part in message.iter_parts():
+        if part.get_content_disposition() != "form-data":
+            continue
+        name = clean_cell(part.get_param("name", header="content-disposition"))
+        filename = clean_cell(part.get_filename())
+        payload = part.get_payload(decode=True) or b""
+        if name and filename:
+            parts.append({"name": name, "filename": filename, "content": payload})
+    return parts
+
+
+def save_uploaded_data_files(parts: list[dict[str, Any]]) -> tuple[HTTPStatus, dict[str, Any]]:
+    selected_parts: dict[str, dict[str, Any]] = {}
+    unknown_fields: list[str] = []
+
+    for part in parts:
+        key = part["name"]
+        if key not in DATA_FILE_BY_KEY:
+            unknown_fields.append(key)
+            continue
+        selected_parts[key] = part
+
+    if unknown_fields:
+        return (
+            HTTPStatus.BAD_REQUEST,
+            {
+                "ok": False,
+                "message": f"Campo de arquivo inválido: {', '.join(sorted(unknown_fields))}.",
+            },
+        )
+
+    if not selected_parts:
+        return (
+            HTTPStatus.BAD_REQUEST,
+            {"ok": False, "message": "Selecione ao menos um arquivo CSV para atualizar."},
+        )
+
+    upload_plan = []
+    for key, part in selected_parts.items():
+        data_file = DATA_FILE_BY_KEY[key]
+        content = part["content"]
+        try:
+            validate_uploaded_csv_headers(content, data_file)
+        except ValueError as error:
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "message": str(error)}
+
+        if not part["filename"].lower().endswith(".csv"):
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "message": f"O arquivo {data_file['label']} deve estar em CSV."},
+            )
+
+        upload_plan.append(
+            {
+                "key": key,
+                "label": data_file["label"],
+                "target": data_file["path"],
+                "filename": part["filename"],
+                "content": content,
+                "size": len(content),
+            }
+        )
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    temp_paths: list[Path] = []
+    uploaded = []
+    try:
+        for item in upload_plan:
+            target = item["target"]
+            temp_path = target.with_name(f".{target.name}.{secrets.token_hex(8)}.tmp")
+            temp_path.write_bytes(item["content"])
+            temp_paths.append(temp_path)
+            item["temp_path"] = temp_path
+
+        for item in upload_plan:
+            os.replace(item["temp_path"], item["target"])
+            uploaded.append(
+                {
+                    "key": item["key"],
+                    "label": item["label"],
+                    "file_name": relative_display(item["target"]),
+                    "original_name": item["filename"],
+                    "size": item["size"],
+                }
+            )
+    finally:
+        for temp_path in temp_paths:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    state = refresh_data(force_rebuild=True)
+    status = HTTPStatus.OK if state.get("ready") else HTTPStatus.SERVICE_UNAVAILABLE
+    return (
+        status,
+        {
+            "ok": bool(state.get("ready")),
+            "message": (
+                "Arquivos enviados e base atualizada com sucesso."
+                if state.get("ready")
+                else state.get("message", "Arquivos enviados, mas a base não foi carregada.")
+            ),
+            "uploaded": uploaded,
+            "ready": bool(state.get("ready")),
+            "missing_files": state.get("missing_files", []),
+            "sources": state.get("sources", []),
+        },
+    )
 
 
 def file_signature() -> list[dict[str, Any]]:
@@ -1786,6 +1943,27 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             data = {}
         return data if isinstance(data, dict) else {}
 
+    def read_limited_body(self, max_bytes: int) -> tuple[HTTPStatus, str, bytes | None]:
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            return HTTPStatus.BAD_REQUEST, "Tamanho do upload inválido.", None
+
+        if length <= 0:
+            return HTTPStatus.BAD_REQUEST, "Nenhum arquivo foi enviado.", None
+        if length > max_bytes:
+            limit_mb = max_bytes // (1024 * 1024)
+            return (
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                f"O upload excede o limite de {limit_mb} MB.",
+                None,
+            )
+
+        body = self.rfile.read(length)
+        if len(body) != length:
+            return HTTPStatus.BAD_REQUEST, "Upload incompleto. Tente novamente.", None
+        return HTTPStatus.OK, "", body
+
     def redirect(self, location: str) -> None:
         self.send_response(HTTPStatus.FOUND)
         self.send_header("Location", location)
@@ -2014,9 +2192,39 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
-        data = self.read_json_body()
+
+        if parsed.path == "/api/admin/data/upload":
+            admin_user = self.require_api_user(admin=True)
+            if not admin_user:
+                return
+
+            status, message, body = self.read_limited_body(MAX_UPLOAD_BYTES)
+            if body is None:
+                self.send_json({"ok": False, "message": message}, status=status)
+                return
+
+            try:
+                parts = parse_multipart_form(self.headers.get("Content-Type", ""), body)
+                response_status, response = save_uploaded_data_files(parts)
+            except ValueError as error:
+                self.send_json(
+                    {"ok": False, "message": str(error)},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            except Exception as error:
+                print(f"Falha ao atualizar CSVs: {error}")
+                self.send_json(
+                    {"ok": False, "message": "Não foi possível atualizar os arquivos da base."},
+                    status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                )
+                return
+
+            self.send_json(response, status=response_status)
+            return
 
         if parsed.path == "/api/auth/login":
+            data = self.read_json_body()
             status, response, session_token = authenticate_user(
                 normalize_email(data.get("email")),
                 str(data.get("senha") or ""),
@@ -2027,6 +2235,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/auth/register":
+            data = self.read_json_body()
             ok, message = create_pending_user(data)
             self.send_json(
                 {"ok": ok, "message": message},
@@ -2043,6 +2252,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/auth/password/forgot":
+            data = self.read_json_body()
             response = request_password_reset(
                 normalize_email(data.get("email")),
                 self.client_ip(),
@@ -2053,11 +2263,13 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/auth/password/reset":
+            data = self.read_json_body()
             status, response = reset_password(data)
             self.send_json(response, status=status)
             return
 
         if parsed.path == "/api/data/refresh":
+            data = self.read_json_body()
             if not self.require_api_user():
                 return
             state = refresh_data(force_rebuild=bool(data.get("force")))
@@ -2075,6 +2287,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/users/action":
+            data = self.read_json_body()
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
                 return

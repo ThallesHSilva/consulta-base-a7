@@ -95,6 +95,37 @@ class PdfExportTest(unittest.TestCase):
         self.assertIn(b"%%EOF", pdf)
 
 
+class DataUploadTest(unittest.TestCase):
+    def test_validate_uploaded_csv_headers_accepts_expected_cnpj_column(self):
+        headers = app.validate_uploaded_csv_headers(
+            b"NR_CNPJ;NM_CLIENTE\n12;Cliente\n",
+            app.DATA_FILE_BY_KEY["mapa_parque"],
+        )
+        self.assertIn("NR_CNPJ", headers)
+
+    def test_validate_uploaded_csv_headers_rejects_wrong_file(self):
+        with self.assertRaises(ValueError):
+            app.validate_uploaded_csv_headers(
+                b"DOCUMENTO;NM_CLIENTE\n12;Cliente\n",
+                app.DATA_FILE_BY_KEY["parque_movel"],
+            )
+
+    def test_parse_multipart_form_extracts_named_csv_file(self):
+        boundary = "----a7boundary"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="mapa_parque"; filename="MAPA PARQUE.csv"\r\n'
+            "Content-Type: text/csv\r\n\r\n"
+            "NR_CNPJ;NM_CLIENTE\r\n12;Cliente\r\n"
+            f"--{boundary}--\r\n"
+        ).encode("utf-8")
+        parts = app.parse_multipart_form(f"multipart/form-data; boundary={boundary}", body)
+        self.assertEqual(len(parts), 1)
+        self.assertEqual(parts[0]["name"], "mapa_parque")
+        self.assertEqual(parts[0]["filename"], "MAPA PARQUE.csv")
+        self.assertIn(b"NR_CNPJ", parts[0]["content"])
+
+
 class SearchHistoryTest(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()

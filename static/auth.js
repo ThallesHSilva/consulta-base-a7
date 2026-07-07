@@ -10,6 +10,10 @@ const adminRefreshButton = document.querySelector("#adminRefreshButton");
 const adminUsersBody = document.querySelector("#adminUsersBody");
 const adminUsersCount = document.querySelector("#adminUsersCount");
 const adminMessage = document.querySelector("#adminMessage");
+const dataUploadForm = document.querySelector("#dataUploadForm");
+const dataUploadButton = document.querySelector("#dataUploadButton");
+const dataUploadMessage = document.querySelector("#dataUploadMessage");
+const dataUploadSummary = document.querySelector("#dataUploadSummary");
 const sidebarToggleAuth = document.querySelector("#sidebarToggle");
 
 function showAuthMessage(message, type = "error", target = authMessage) {
@@ -40,6 +44,26 @@ function setSubmitLoading(form, loading) {
   if (!button) return;
   button.disabled = loading;
   button.classList.toggle("is-loading", loading);
+}
+
+function setDataUploadLoading(loading) {
+  if (!dataUploadButton) return;
+  dataUploadButton.disabled = loading;
+  dataUploadButton.classList.toggle("is-loading", loading);
+  dataUploadButton.setAttribute("aria-busy", loading ? "true" : "false");
+}
+
+function formatBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes)) return "-";
+  const units = ["B", "KB", "MB", "GB"];
+  let amount = bytes;
+  let unitIndex = 0;
+  while (amount >= 1024 && unitIndex < units.length - 1) {
+    amount /= 1024;
+    unitIndex += 1;
+  }
+  return `${amount.toLocaleString("pt-BR", { maximumFractionDigits: unitIndex ? 1 : 0 })} ${units[unitIndex]}`;
 }
 
 function formatDate(value) {
@@ -151,6 +175,45 @@ function renderUsers(users) {
   });
 }
 
+function renderDataUploadSummary(data) {
+  if (!dataUploadSummary) return;
+  dataUploadSummary.innerHTML = "";
+
+  const uploaded = data.uploaded || [];
+  const sources = data.sources || [];
+  if (!uploaded.length && !sources.length) {
+    dataUploadSummary.hidden = true;
+    return;
+  }
+
+  if (uploaded.length) {
+    const title = document.createElement("strong");
+    title.textContent = "Arquivos recebidos";
+    const list = document.createElement("ul");
+    uploaded.forEach((item) => {
+      const row = document.createElement("li");
+      row.textContent = `${item.label}: ${formatBytes(item.size)}`;
+      list.appendChild(row);
+    });
+    dataUploadSummary.append(title, list);
+  }
+
+  if (sources.length) {
+    const title = document.createElement("strong");
+    title.textContent = "Base carregada";
+    const list = document.createElement("ul");
+    sources.forEach((source) => {
+      const row = document.createElement("li");
+      const rows = Number(source.indexed_count || 0).toLocaleString("pt-BR");
+      row.textContent = `${source.label}: ${rows} linhas indexadas`;
+      list.appendChild(row);
+    });
+    dataUploadSummary.append(title, list);
+  }
+
+  dataUploadSummary.hidden = false;
+}
+
 async function loadAdminUsers() {
   if (!adminUsersBody) return;
   hideAuthMessage(adminMessage);
@@ -178,6 +241,48 @@ async function runUserAction(userId, action) {
     await loadAdminUsers();
   }
 }
+
+dataUploadForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  hideAuthMessage(dataUploadMessage);
+  if (dataUploadSummary) dataUploadSummary.hidden = true;
+
+  const hasFile = [...dataUploadForm.querySelectorAll("input[type='file']")].some(
+    (input) => input.files.length > 0,
+  );
+  if (!hasFile) {
+    showAuthMessage("Selecione ao menos um arquivo CSV para atualizar.", "error", dataUploadMessage);
+    return;
+  }
+
+  setDataUploadLoading(true);
+  showAuthMessage("Enviando arquivos e reconstruindo a base...", "success", dataUploadMessage);
+  try {
+    const response = await fetch("/api/admin/data/upload", {
+      method: "POST",
+      body: new FormData(dataUploadForm),
+    });
+    if (response.status === 401) {
+      window.location.href = "/login";
+      return;
+    }
+    const data = await response.json();
+    const ok = response.ok && data.ok;
+    showAuthMessage(
+      data.message || (ok ? "Base atualizada com sucesso." : "Não foi possível atualizar a base."),
+      ok ? "success" : "error",
+      dataUploadMessage,
+    );
+    if (ok) {
+      dataUploadForm.reset();
+      renderDataUploadSummary(data);
+    }
+  } catch (error) {
+    showAuthMessage("Não foi possível enviar os arquivos. Tente novamente.", "error", dataUploadMessage);
+  } finally {
+    setDataUploadLoading(false);
+  }
+});
 
 loginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();

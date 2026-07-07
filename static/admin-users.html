@@ -83,6 +83,47 @@
           </div>
         </header>
 
+        <section class="dashboard-card data-upload-panel" aria-label="Atualização de bases CSV">
+          <div class="panel-title-row">
+            <div>
+              <span class="eyebrow">Bases CSV</span>
+              <h2>Atualização de bases</h2>
+            </div>
+            <span class="badge neutral">Acesso administrador</span>
+          </div>
+          <form id="dataUploadForm" class="data-upload-form" enctype="multipart/form-data">
+            <div class="upload-grid">
+              <label class="file-upload">
+                <span>MAPA PARQUE.csv</span>
+                <input id="uploadMapaParque" name="mapa_parque" type="file" accept=".csv,text/csv" />
+              </label>
+              <label class="file-upload">
+                <span>PARQUE MOVEL.csv</span>
+                <input id="uploadParqueMovel" name="parque_movel" type="file" accept=".csv,text/csv" />
+              </label>
+              <label class="file-upload">
+                <span>PARQUE FIXA.csv</span>
+                <input id="uploadParqueFixa" name="parque_fixa" type="file" accept=".csv,text/csv" />
+              </label>
+            </div>
+            <div class="upload-actions">
+              <p id="dataUploadMessage" class="auth-message" aria-live="polite" hidden></p>
+              <button id="dataUploadButton" class="gradient-button" type="submit">
+                <span class="button-content">
+                  Enviar e atualizar base
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3v12" />
+                    <path d="m7 8 5-5 5 5" />
+                    <path d="M5 21h14" />
+                  </svg>
+                </span>
+                <span class="button-spinner" aria-hidden="true"></span>
+              </button>
+            </div>
+          </form>
+          <div id="dataUploadSummary" class="upload-summary" hidden></div>
+        </section>
+
         <section class="dashboard-card admin-toolbar" aria-label="Filtros de usuários">
           <label>
             <span>Pesquisar</span>
