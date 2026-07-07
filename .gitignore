@@ -9,5 +9,3 @@ __pycache__/
 .env
 .env.*
 
-# Os CSVs possuem dados operacionais/clientes e devem ser copiados direto para a VPS.
-data/*.csv
