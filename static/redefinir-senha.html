@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Redefinir senha - A7 Connect</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell single">
+      <section class="auth-card dashboard-card">
+        <img class="auth-logo small" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+        <div class="auth-heading">
+          <h2>Crie uma nova senha</h2>
+          <p>A nova senha deve ter no mínimo 8 caracteres, letra e número.</p>
+        </div>
+        <form id="resetPasswordForm" class="auth-form">
+          <label>
+            <span>Nova senha</span>
+            <input id="resetPassword" name="senha" type="password" autocomplete="new-password" required />
+          </label>
+          <label>
+            <span>Confirmar nova senha</span>
+            <input id="resetPasswordConfirm" name="senha_confirmacao" type="password" autocomplete="new-password" required />
+          </label>
+          <button class="gradient-button auth-submit" type="submit">Redefinir senha</button>
+          <a class="text-link centered" href="/login">Voltar para login</a>
+          <p id="authMessage" class="auth-message" aria-live="polite" hidden></p>
+        </form>
+      </section>
+    </main>
+    <script src="/static/auth.js"></script>
+  </body>
+</html>

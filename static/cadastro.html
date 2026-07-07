@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Criar conta - A7 Connect</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell">
+      <section class="auth-brand-panel">
+        <img class="auth-logo" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+        <div>
+          <span class="eyebrow">Cadastro</span>
+          <h1>Solicite acesso à plataforma</h1>
+          <p>Seu cadastro será enviado para aprovação antes da liberação do sistema.</p>
+        </div>
+      </section>
+
+      <section class="auth-card dashboard-card" aria-label="Cadastro">
+        <div class="auth-tabs">
+          <a class="auth-tab" href="/login">Entrar</a>
+          <a class="auth-tab active" href="/cadastro">Criar conta</a>
+        </div>
+        <div class="auth-heading">
+          <h2>Criar conta</h2>
+          <p>Informe seus dados para solicitar aprovação.</p>
+        </div>
+        <form id="registerForm" class="auth-form">
+          <label>
+            <span>Nome completo</span>
+            <input id="registerName" name="nome_completo" type="text" autocomplete="name" required />
+          </label>
+          <label>
+            <span>E-mail</span>
+            <input id="registerEmail" name="email" type="email" autocomplete="email" required />
+          </label>
+          <label>
+            <span>Senha</span>
+            <input id="registerPassword" name="senha" type="password" autocomplete="new-password" required />
+          </label>
+          <label>
+            <span>Confirmar senha</span>
+            <input id="registerPasswordConfirm" name="senha_confirmacao" type="password" autocomplete="new-password" required />
+          </label>
+          <button class="gradient-button auth-submit" type="submit">Enviar cadastro</button>
+          <p id="authMessage" class="auth-message" aria-live="polite" hidden></p>
+        </form>
+      </section>
+    </main>
+
+    <script src="/static/auth.js"></script>
+  </body>
+</html>

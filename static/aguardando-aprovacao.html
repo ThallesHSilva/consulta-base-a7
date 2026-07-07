@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aguardando aprovação - A7 Connect</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell single">
+      <section class="auth-card dashboard-card auth-state-card">
+        <img class="auth-logo small" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+        <span class="badge neutral">PENDENTE_APROVACAO</span>
+        <h1>Aguardando aprovação</h1>
+        <p id="pendingMessage">
+          Cadastro realizado com sucesso. Aguarde a aprovação do administrador para acessar o sistema.
+        </p>
+        <a class="gradient-button auth-submit" href="/login">Voltar para login</a>
+      </section>
+    </main>
+    <script src="/static/auth.js"></script>
+  </body>
+</html>

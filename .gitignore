@@ -1,0 +1,13 @@
+.cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.db
+*.log
+.env
+.env.*
+
+# Os CSVs possuem dados operacionais/clientes e devem ser copiados direto para a VPS.
+data/*.csv

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Esqueci minha senha - A7 Connect</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell single">
+      <section class="auth-card dashboard-card">
+        <img class="auth-logo small" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+        <div class="auth-heading">
+          <h2>Redefinir senha</h2>
+          <p>Informe o e-mail cadastrado para receber as instruções.</p>
+        </div>
+        <form id="forgotPasswordForm" class="auth-form">
+          <label>
+            <span>E-mail cadastrado</span>
+            <input id="forgotEmail" name="email" type="email" autocomplete="email" required />
+          </label>
+          <button class="gradient-button auth-submit" type="submit">Enviar instruções</button>
+          <a class="text-link centered" href="/login">Voltar para login</a>
+          <p id="authMessage" class="auth-message" aria-live="polite" hidden></p>
+        </form>
+      </section>
+    </main>
+    <script src="/static/auth.js"></script>
+  </body>
+</html>

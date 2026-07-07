@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Detalhamento</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-layout">
+      <aside class="sidebar" aria-label="Navegação principal">
+        <div class="sidebar-brand">
+          <img class="brand-logo" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+        </div>
+
+        <nav class="sidebar-nav">
+          <a class="nav-item active" href="/app" title="Consulta por CNPJ">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" />
+              <path d="M14 3v6h6" />
+              <path d="M9 14h6" />
+              <path d="M9 18h4" />
+            </svg>
+            <span>Consulta por CNPJ</span>
+          </a>
+          <a id="adminNavItem" class="nav-item" href="/admin/usuarios" title="Painel Administrativo" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 21v-2a4 4 0 0 0-3-3.9" />
+              <path d="M16 3.1a4 4 0 0 1 0 7.8" />
+            </svg>
+            <span>Painel Administrativo</span>
+          </a>
+          <a class="nav-item" href="/historico" title="Histórico">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7" />
+              <path d="M3 4v5h5" />
+              <path d="M12 7v5l3 2" />
+            </svg>
+            <span>Histórico</span>
+          </a>
+          <a class="nav-item" href="#" title="Configurações">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
+              <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7.2 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 .9-1.6V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 20 7.2l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6.9h.2a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.8.8Z" />
+            </svg>
+            <span>Configurações</span>
+          </a>
+          <a class="nav-item" href="#" title="Ajuda">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M9.8 9a2.4 2.4 0 0 1 4.5 1.2c0 1.8-2.3 2.1-2.3 3.6" />
+              <path d="M12 17h.01" />
+            </svg>
+            <span>Ajuda</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="user-card">
+            <span id="currentUserInitials" class="avatar" aria-hidden="true">--</span>
+            <div>
+              <strong id="currentUserName">Usuário</strong>
+              <span id="currentUserRole">Perfil</span>
+            </div>
+          </div>
+          <button id="logoutButton" class="logout-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <path d="M16 17l5-5-5-5" />
+              <path d="M21 12H9" />
+            </svg>
+            <span>Sair</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="page-header">
+          <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Abrir menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 7h16" />
+              <path d="M4 12h16" />
+              <path d="M4 17h16" />
+            </svg>
+          </button>
+          <div class="title-stack">
+            <span class="eyebrow">Consulta Base</span>
+            <h1 id="detailTitle">Detalhamento</h1>
+            <p>Analise as informações vinculadas ao CNPJ consultado</p>
+          </div>
+          <div class="header-actions">
+            <a id="backLink" class="outline-button back-link" href="/">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M19 12H5" />
+                <path d="m11 18-6-6 6-6" />
+              </svg>
+              <span>Voltar</span>
+            </a>
+            <div class="analytics-illustration compact" aria-hidden="true">
+              <svg viewBox="0 0 120 96">
+                <circle cx="48" cy="38" r="24" />
+                <path d="M66 56 95 85" />
+                <rect x="77" y="54" width="9" height="24" rx="3" />
+                <rect x="92" y="43" width="9" height="35" rx="3" />
+                <rect x="107" y="32" width="9" height="46" rx="3" />
+              </svg>
+            </div>
+          </div>
+        </header>
+
+        <section class="client-card dashboard-card detail-client" aria-label="Cliente">
+          <article class="client-column">
+            <span class="feature-icon purple">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 21V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v16" />
+                <path d="M16 9h2a2 2 0 0 1 2 2v10" />
+                <path d="M8 7h4" />
+                <path d="M8 11h4" />
+                <path d="M8 15h4" />
+                <path d="M3 21h18" />
+              </svg>
+            </span>
+            <div class="client-copy">
+              <span class="section-label">Razão social</span>
+              <h2 id="detailCompanyName" class="company-name">-</h2>
+            </div>
+          </article>
+
+          <article class="client-column">
+            <span class="feature-icon blue">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="M7 9h10" />
+                <path d="M7 13h6" />
+              </svg>
+            </span>
+            <div class="client-copy">
+              <span class="section-label">CNPJ consultado</span>
+              <strong id="detailCnpj" class="highlight-value">-</strong>
+              <span class="badge success">Consulta preservada</span>
+            </div>
+          </article>
+        </section>
+
+        <section id="detailContent" class="detail-panel dashboard-card" aria-live="polite"></section>
+      </main>
+    </div>
+
+    <script src="/static/session.js"></script>
+    <script src="/static/detail.js"></script>
+  </body>
+</html>
