@@ -3,6 +3,7 @@
   const userRole = document.querySelector("#currentUserRole");
   const userInitials = document.querySelector("#currentUserInitials");
   const adminNavItem = document.querySelector("#adminNavItem");
+  const adminReportsNavItem = document.querySelector("#adminReportsNavItem");
   const logoutButton = document.querySelector("#logoutButton");
 
   function initials(name) {
@@ -42,6 +43,7 @@
     if (userRole) userRole.textContent = user.perfil === "ADMIN" ? "Administrador" : "Usuário";
     if (userInitials) userInitials.textContent = initials(user.nome_completo);
     if (adminNavItem) adminNavItem.hidden = user.perfil !== "ADMIN";
+    if (adminReportsNavItem) adminReportsNavItem.hidden = user.perfil !== "ADMIN";
   } catch (error) {
     window.location.href = "/login";
   }

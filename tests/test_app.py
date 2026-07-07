@@ -174,6 +174,25 @@ class SearchHistoryTest(unittest.TestCase):
         self.assertEqual(items[0]["company_name"], "Cliente Atualizado")
         self.assertTrue(items[0]["found"])
 
+    def test_usage_report_counts_repeated_consultations(self):
+        app.save_search_history(
+            1,
+            "11.222.333/0001-44",
+            {"query": "11.222.333/0001-44", "total": 1, "company_name": "Cliente"},
+        )
+        app.save_search_history(
+            1,
+            "11222333000144",
+            {"query": "11222333000144", "total": 1, "company_name": "Cliente"},
+        )
+
+        report = app.usage_ranking_report()
+        admin = next(item for item in report["items"] if item["email"] == "admin@a7connect.local")
+        self.assertEqual(admin["consultas_totais"], 2)
+        self.assertEqual(admin["consultas_mensais"], 2)
+        self.assertEqual(admin["consultas_diarias"], 2)
+        self.assertEqual(admin["posicao"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

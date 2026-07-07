@@ -25,6 +25,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 ROOT = Path(__file__).resolve().parent
@@ -49,6 +50,7 @@ GENERIC_RESET_MESSAGE = (
 DB_TIMEOUT_SECONDS = 30
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(300 * 1024 * 1024)))
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "America/Sao_Paulo")
 SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {
     "1",
     "true",
@@ -96,6 +98,57 @@ def utc_now() -> datetime:
 
 def utc_iso(value: datetime | None = None) -> str:
     return (value or utc_now()).isoformat(timespec="seconds")
+
+
+def app_zoneinfo() -> ZoneInfo:
+    try:
+        return ZoneInfo(APP_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+def parse_iso_datetime(value: Any) -> datetime | None:
+    raw = clean_cell(value)
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def elapsed_label(value: Any, now: datetime | None = None) -> str:
+    parsed = parse_iso_datetime(value)
+    if not parsed:
+        return "Nunca"
+
+    current = now or utc_now()
+    seconds = max(0, int((current - parsed.astimezone(timezone.utc)).total_seconds()))
+    if seconds < 60:
+        return "Agora"
+
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} min"
+
+    hours = minutes // 60
+    if hours < 24:
+        remaining_minutes = minutes % 60
+        return f"{hours}h {remaining_minutes}min" if remaining_minutes else f"{hours}h"
+
+    days = hours // 24
+    if days < 30:
+        return f"{days} dia" if days == 1 else f"{days} dias"
+
+    months = days // 30
+    if months < 12:
+        return f"{months} mês" if months == 1 else f"{months} meses"
+
+    years = days // 365
+    return f"{years} ano" if years == 1 else f"{years} anos"
 
 
 def normalize_email(value: Any) -> str:
@@ -612,6 +665,17 @@ def initialize_auth_database() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
 
+            CREATE TABLE IF NOT EXISTS search_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                cnpj_key TEXT NOT NULL,
+                cnpj_display TEXT NOT NULL,
+                company_name TEXT,
+                data_consulta TEXT NOT NULL,
+                total INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
             CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
             CREATE INDEX IF NOT EXISTS idx_sessions_hash ON sessions(token_hash);
@@ -622,9 +686,31 @@ def initialize_auth_database() -> None:
                 ON search_history(user_id, data_consulta);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_search_history_user_cnpj
                 ON search_history(user_id, cnpj_key);
+            CREATE INDEX IF NOT EXISTS idx_search_events_user_date
+                ON search_events(user_id, data_consulta);
+            CREATE INDEX IF NOT EXISTS idx_search_events_date
+                ON search_events(data_consulta);
             """
         )
+        backfill_search_events(conn)
         ensure_initial_admin(conn)
+
+
+def backfill_search_events(conn: sqlite3.Connection) -> None:
+    events_count = conn.execute("SELECT COUNT(*) FROM search_events").fetchone()[0]
+    if events_count:
+        return
+
+    conn.execute(
+        """
+        INSERT INTO search_events (
+            user_id, cnpj_key, cnpj_display, company_name, data_consulta, total
+        )
+        SELECT user_id, cnpj_key, cnpj_display, company_name, data_consulta, total
+        FROM search_history
+        """
+    )
+    conn.commit()
 
 
 def ensure_initial_admin(conn: sqlite3.Connection) -> None:
@@ -1565,6 +1651,15 @@ def save_search_history(
         total = 0
 
     with open_auth_db() as conn:
+        now = utc_iso()
+        conn.execute(
+            """
+            INSERT INTO search_events (
+                user_id, cnpj_key, cnpj_display, company_name, data_consulta, total
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, key, display, company_name, now, total),
+        )
         conn.execute(
             """
             INSERT INTO search_history (
@@ -1576,7 +1671,7 @@ def save_search_history(
                 data_consulta = excluded.data_consulta,
                 total = excluded.total
             """,
-            (user_id, key, display, company_name, utc_iso(), total),
+            (user_id, key, display, company_name, now, total),
         )
         conn.execute(
             """
@@ -1619,6 +1714,96 @@ def list_search_history(user_id: int) -> list[dict[str, Any]]:
         }
         for row in rows
     ]
+
+
+def usage_ranking_report() -> dict[str, Any]:
+    zone = app_zoneinfo()
+    now_utc = utc_now()
+    now_local = now_utc.astimezone(zone)
+    today = now_local.date()
+    month_key = (now_local.year, now_local.month)
+
+    with open_auth_db() as conn:
+        users = conn.execute(
+            """
+            SELECT id, nome_completo, email, perfil, status, ultimo_login
+            FROM users
+            ORDER BY nome_completo COLLATE NOCASE
+            """
+        ).fetchall()
+        events = conn.execute(
+            """
+            SELECT user_id, data_consulta
+            FROM search_events
+            """
+        ).fetchall()
+
+    stats: dict[int, dict[str, Any]] = {}
+    for user in users:
+        stats[user["id"]] = {
+            "user_id": user["id"],
+            "nome_completo": user["nome_completo"],
+            "email": user["email"],
+            "perfil": user["perfil"],
+            "status": user["status"],
+            "consultas_diarias": 0,
+            "consultas_mensais": 0,
+            "consultas_totais": 0,
+            "ultima_consulta": "",
+            "tempo_desde_ultima_consulta": "Nunca",
+            "ultimo_login": user["ultimo_login"] or "",
+            "tempo_desde_ultimo_login": elapsed_label(user["ultimo_login"], now_utc),
+        }
+
+    for event in events:
+        user_stat = stats.get(event["user_id"])
+        if not user_stat:
+            continue
+
+        event_dt = parse_iso_datetime(event["data_consulta"])
+        if not event_dt:
+            continue
+
+        event_local = event_dt.astimezone(zone)
+        user_stat["consultas_totais"] += 1
+        if event_local.date() == today:
+            user_stat["consultas_diarias"] += 1
+        if (event_local.year, event_local.month) == month_key:
+            user_stat["consultas_mensais"] += 1
+
+        current_last = parse_iso_datetime(user_stat["ultima_consulta"])
+        if not current_last or event_dt > current_last:
+            user_stat["ultima_consulta"] = event_dt.isoformat(timespec="seconds")
+
+    items = list(stats.values())
+    for item in items:
+        item["tempo_desde_ultima_consulta"] = elapsed_label(item["ultima_consulta"], now_utc)
+
+    items.sort(
+        key=lambda item: (
+            item["consultas_totais"],
+            item["consultas_mensais"],
+            item["consultas_diarias"],
+            item["ultima_consulta"] or "",
+        ),
+        reverse=True,
+    )
+
+    for index, item in enumerate(items, start=1):
+        item["posicao"] = index
+
+    return {
+        "ok": True,
+        "timezone": APP_TIMEZONE,
+        "generated_at": utc_iso(now_utc),
+        "summary": {
+            "usuarios": len(items),
+            "consultas_diarias": sum(item["consultas_diarias"] for item in items),
+            "consultas_mensais": sum(item["consultas_mensais"] for item in items),
+            "consultas_totais": sum(item["consultas_totais"] for item in items),
+        },
+        "items": items,
+    }
 
 
 def update_user_status(
@@ -2090,6 +2275,12 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             self.serve_static_file(STATIC_DIR / "admin-users.html", "text/html; charset=utf-8")
             return
 
+        if parsed.path == "/admin/relatorios":
+            if not self.require_page_user(admin=True):
+                return
+            self.serve_static_file(STATIC_DIR / "admin-reports.html", "text/html; charset=utf-8")
+            return
+
         if parsed.path == "/api/auth/me":
             user = self.get_current_user()
             if not user:
@@ -2111,6 +2302,12 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                     ),
                 }
             )
+            return
+
+        if parsed.path == "/api/admin/reports/usage":
+            if not self.require_api_user(admin=True):
+                return
+            self.send_json(usage_ranking_report())
             return
 
         if parsed.path == "/api/status":

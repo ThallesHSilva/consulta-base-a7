@@ -42,6 +42,7 @@ PORT=8000
 PUBLIC_BASE_URL=https://seu-dominio.com.br
 SESSION_COOKIE_SECURE=1
 MAX_UPLOAD_BYTES=314572800
+APP_TIMEZONE=America/Sao_Paulo
 ADMIN_EMAIL=admin@seu-dominio.com.br
 ADMIN_NAME='Nome do Administrador'
 ADMIN_PASSWORD='troque-esta-senha'
@@ -61,6 +62,8 @@ Observacoes importantes:
 - Use `SESSION_COOKIE_SECURE=1` somente quando o acesso externo estiver em HTTPS.
 - O painel administrativo possui upload semanal dos CSVs em `POST /api/admin/data/upload`; o envio exige usuario `ADMIN`.
 - `MAX_UPLOAD_BYTES` define o limite do endpoint de upload. O padrao e 300 MB.
+- `APP_TIMEZONE` define o fuso usado nos relatorios diarios e mensais. O padrao e `America/Sao_Paulo`.
+- A pagina `/admin/relatorios` mostra o ranking de uso por usuario e exige perfil `ADMIN`.
 - Defina `ADMIN_EMAIL`, `ADMIN_NAME` e `ADMIN_PASSWORD` antes da primeira inicializacao. Se `.cache/auth.sqlite3` ja existir, essas variaveis nao recriam o administrador.
 - Nao suba a pasta `.cache/` de ambiente local para a VPS se quiser criar credenciais limpas em producao.
 
@@ -78,6 +81,7 @@ Environment=PORT=8000
 Environment=PUBLIC_BASE_URL=https://seu-dominio.com.br
 Environment=SESSION_COOKIE_SECURE=1
 Environment=MAX_UPLOAD_BYTES=314572800
+Environment=APP_TIMEZONE=America/Sao_Paulo
 Environment=ADMIN_EMAIL=admin@seu-dominio.com.br
 Environment=ADMIN_NAME=Nome do Administrador
 Environment=ADMIN_PASSWORD=troque-esta-senha

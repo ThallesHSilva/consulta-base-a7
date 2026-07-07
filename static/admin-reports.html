@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Histórico de consultas - A7 Connect</title>
+    <title>Relatórios - A7 Connect</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -29,7 +29,15 @@
             </svg>
             <span>Consulta por CNPJ</span>
           </a>
-          <a id="adminNavItem" class="nav-item" href="/admin/usuarios" title="Painel Administrativo" hidden>
+          <a class="nav-item" href="/historico" title="Histórico">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 3-6.7" />
+              <path d="M3 4v5h5" />
+              <path d="M12 7v5l3 2" />
+            </svg>
+            <span>Histórico</span>
+          </a>
+          <a id="adminNavItem" class="nav-item" href="/admin/usuarios" title="Painel Administrativo">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
@@ -38,7 +46,7 @@
             </svg>
             <span>Painel Administrativo</span>
           </a>
-          <a id="adminReportsNavItem" class="nav-item" href="/admin/relatorios" title="Relatórios" hidden>
+          <a id="adminReportsNavItem" class="nav-item active" href="/admin/relatorios" title="Relatórios">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M3 3v18h18" />
               <path d="M7 14h3v3H7z" />
@@ -46,29 +54,6 @@
               <path d="M17 6h3v11h-3z" />
             </svg>
             <span>Relatórios</span>
-          </a>
-          <a class="nav-item active" href="/historico" title="Histórico">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M3 12a9 9 0 1 0 3-6.7" />
-              <path d="M3 4v5h5" />
-              <path d="M12 7v5l3 2" />
-            </svg>
-            <span>Histórico</span>
-          </a>
-          <a class="nav-item" href="#" title="Configurações">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-              <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7.2 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 .9-1.6V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 20 7.2l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6.9h.2a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.8.8Z" />
-            </svg>
-            <span>Configurações</span>
-          </a>
-          <a class="nav-item" href="#" title="Ajuda">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M9.8 9a2.4 2.4 0 0 1 4.5 1.2c0 1.8-2.3 2.1-2.3 3.6" />
-              <path d="M12 17h.01" />
-            </svg>
-            <span>Ajuda</span>
           </a>
         </nav>
 
@@ -101,12 +86,12 @@
             </svg>
           </button>
           <div class="title-stack">
-            <span class="eyebrow">Consulta Base</span>
-            <h1>Histórico de consultas</h1>
-            <p>Reabra rapidamente os últimos CNPJs consultados neste usuário.</p>
+            <span class="eyebrow">Relatórios</span>
+            <h1>Ranking de utilização</h1>
+            <p>Acompanhe consultas por usuário e recência de uso da plataforma.</p>
           </div>
           <div class="header-actions">
-            <button id="historyRefreshButton" class="ghost-button" type="button" title="Atualizar histórico">
+            <button id="reportsRefreshButton" class="ghost-button" type="button" title="Atualizar relatório">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M21 12a9 9 0 0 1-15 6.7" />
                 <path d="M3 12A9 9 0 0 1 18 5.3" />
@@ -115,39 +100,52 @@
               </svg>
               <span>Atualizar</span>
             </button>
-            <div class="analytics-illustration compact" aria-hidden="true">
-              <svg viewBox="0 0 120 96">
-                <circle cx="48" cy="38" r="24" />
-                <path d="M66 56 95 85" />
-                <rect x="77" y="54" width="9" height="24" rx="3" />
-                <rect x="92" y="43" width="9" height="35" rx="3" />
-                <rect x="107" y="32" width="9" height="46" rx="3" />
-              </svg>
-            </div>
           </div>
         </header>
 
-        <section class="dashboard-card history-panel" aria-label="Últimas consultas">
+        <section class="reports-summary-grid" aria-label="Resumo de uso">
+          <article class="dashboard-card report-summary-card">
+            <span>Consultas hoje</span>
+            <strong id="dailyQueriesValue">0</strong>
+          </article>
+          <article class="dashboard-card report-summary-card">
+            <span>Consultas no mês</span>
+            <strong id="monthlyQueriesValue">0</strong>
+          </article>
+          <article class="dashboard-card report-summary-card">
+            <span>Consultas totais</span>
+            <strong id="totalQueriesValue">0</strong>
+          </article>
+          <article class="dashboard-card report-summary-card">
+            <span>Usuários monitorados</span>
+            <strong id="usersTrackedValue">0</strong>
+          </article>
+        </section>
+
+        <section class="dashboard-card reports-panel" aria-label="Ranking de usuários">
           <div class="panel-title-row">
             <div>
-              <span class="eyebrow">Histórico</span>
-              <h2>Últimos 15 CNPJs consultados</h2>
+              <span class="eyebrow">Ranking</span>
+              <h2>Usuários que mais consultaram</h2>
             </div>
-            <span id="historyCount" class="badge neutral">0 consultas</span>
+            <span id="reportsGeneratedAt" class="badge neutral">Atualizando</span>
           </div>
-          <p id="historyMessage" class="auth-message" aria-live="polite" hidden></p>
+          <p id="reportsMessage" class="auth-message" aria-live="polite" hidden></p>
           <div class="admin-table-wrap">
-            <table class="detail-table history-table">
+            <table class="detail-table reports-table">
               <thead>
                 <tr>
-                  <th>CNPJ</th>
-                  <th>Razão social</th>
-                  <th>Data e hora</th>
+                  <th>#</th>
+                  <th>Usuário</th>
+                  <th>Hoje</th>
+                  <th>Mês</th>
+                  <th>Total</th>
+                  <th>Última consulta</th>
+                  <th>Último login</th>
                   <th>Status</th>
-                  <th>Ação</th>
                 </tr>
               </thead>
-              <tbody id="historyBody"></tbody>
+              <tbody id="reportsBody"></tbody>
             </table>
           </div>
         </section>
@@ -155,6 +153,6 @@
     </div>
 
     <script src="/static/session.js"></script>
-    <script src="/static/history.js"></script>
+    <script src="/static/admin-reports.js"></script>
   </body>
 </html>

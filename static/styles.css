@@ -1467,6 +1467,63 @@ svg rect {
   white-space: nowrap;
 }
 
+.reports-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.report-summary-card {
+  display: grid;
+  gap: 0.45rem;
+  min-height: 7.5rem;
+  padding: 1.2rem;
+}
+
+.report-summary-card span {
+  color: #596077;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.report-summary-card strong {
+  color: var(--purple-dark);
+  font-size: 2.1rem;
+  line-height: 1;
+}
+
+.reports-panel {
+  padding: 1.35rem;
+}
+
+.reports-table td strong,
+.reports-table td span {
+  display: block;
+}
+
+.reports-table td strong {
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.reports-table td span:not(.badge) {
+  margin-top: 0.18rem;
+  color: #6a7286;
+  font-size: 0.8rem;
+}
+
+.ranking-position {
+  color: var(--purple-dark);
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.report-number-cell {
+  color: var(--ink);
+  font-weight: 900;
+}
+
 .admin-table-wrap {
   margin-top: 1rem;
   overflow-x: auto;
@@ -1719,7 +1776,8 @@ svg rect {
 }
 
 @media (max-width: 1320px) {
-  .kpi-grid {
+  .kpi-grid,
+  .reports-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1833,6 +1891,7 @@ svg rect {
 
   .kpi-grid,
   .mobile-summary,
+  .reports-summary-grid,
   .donut-grid,
   .detail-client {
     grid-template-columns: 1fr;
