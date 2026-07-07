@@ -11,17 +11,6 @@ services:
       - HOST=0.0.0.0
       - PORT=8000
       - APP_TIMEZONE=America/Sao_Paulo
-      - SESSION_COOKIE_SECURE=1
-      - PUBLIC_BASE_URL=https://seudominio.com.br
-      - ADMIN_EMAIL=
-      - ADMIN_NAME=
-      - ADMIN_PASSWORD=
-      - SMTP_HOST=
-      - SMTP_PORT=587
-      - SMTP_USER=
-      - SMTP_PASSWORD=
-      - SMTP_FROM=
-      - SMTP_TLS=1
 
 volumes:
   app-cache:

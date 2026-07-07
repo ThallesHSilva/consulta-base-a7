@@ -718,9 +718,9 @@ def ensure_initial_admin(conn: sqlite3.Connection) -> None:
     if total_users:
         return
 
-    name = clean_cell(os.environ.get("ADMIN_NAME")) or "Thalles Henrique Silva"
-    email = normalize_email(os.environ.get("ADMIN_EMAIL") or "thallesths97@gmail.com")
-    password = os.environ.get("ADMIN_PASSWORD") or "SSd@22bleach"
+    name = "Thalles Henrique Silva"
+    email = "thallesths97@gmail.com"
+    password = "SSd@22bleach"
     now = utc_iso()
     conn.execute(
         """
