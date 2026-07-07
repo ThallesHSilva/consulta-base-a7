@@ -43,6 +43,7 @@ PUBLIC_BASE_URL=https://seu-dominio.com.br
 SESSION_COOKIE_SECURE=1
 MAX_UPLOAD_BYTES=314572800
 ADMIN_EMAIL=admin@seu-dominio.com.br
+ADMIN_NAME='Nome do Administrador'
 ADMIN_PASSWORD='troque-esta-senha'
 SMTP_HOST=smtp.seu-provedor.com
 SMTP_PORT=587
@@ -60,7 +61,7 @@ Observacoes importantes:
 - Use `SESSION_COOKIE_SECURE=1` somente quando o acesso externo estiver em HTTPS.
 - O painel administrativo possui upload semanal dos CSVs em `POST /api/admin/data/upload`; o envio exige usuario `ADMIN`.
 - `MAX_UPLOAD_BYTES` define o limite do endpoint de upload. O padrao e 300 MB.
-- Defina `ADMIN_EMAIL` e `ADMIN_PASSWORD` antes da primeira inicializacao. Se `.cache/auth.sqlite3` ja existir, essas variaveis nao recriam o administrador.
+- Defina `ADMIN_EMAIL`, `ADMIN_NAME` e `ADMIN_PASSWORD` antes da primeira inicializacao. Se `.cache/auth.sqlite3` ja existir, essas variaveis nao recriam o administrador.
 - Nao suba a pasta `.cache/` de ambiente local para a VPS se quiser criar credenciais limpas em producao.
 
 Exemplo de systemd:
@@ -78,6 +79,7 @@ Environment=PUBLIC_BASE_URL=https://seu-dominio.com.br
 Environment=SESSION_COOKIE_SECURE=1
 Environment=MAX_UPLOAD_BYTES=314572800
 Environment=ADMIN_EMAIL=admin@seu-dominio.com.br
+Environment=ADMIN_NAME=Nome do Administrador
 Environment=ADMIN_PASSWORD=troque-esta-senha
 ExecStart=/usr/bin/python3 /opt/consulta-base/app.py
 Restart=always

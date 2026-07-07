@@ -632,6 +632,7 @@ def ensure_initial_admin(conn: sqlite3.Connection) -> None:
     if total_users:
         return
 
+    name = clean_cell(os.environ.get("ADMIN_NAME")) or "Administrador A7 Connect"
     email = normalize_email(os.environ.get("ADMIN_EMAIL") or "admin@a7connect.local")
     password = os.environ.get("ADMIN_PASSWORD") or secrets.token_urlsafe(18)
     now = utc_iso()
@@ -642,7 +643,7 @@ def ensure_initial_admin(conn: sqlite3.Connection) -> None:
             data_aprovacao, aprovado_por
         ) VALUES (?, ?, ?, 'ADMIN', 'ATIVO', ?, ?, NULL)
         """,
-        ("Administrador A7 Connect", email, hash_password(password), now, now),
+        (name, email, hash_password(password), now, now),
     )
     conn.commit()
 
