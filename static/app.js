@@ -38,11 +38,15 @@ const aboveM17Percent = document.querySelector("#aboveM17Percent");
 const m0M16Bar = document.querySelector("#m0M16Bar");
 const m17Bar = document.querySelector("#m17Bar");
 const aboveM17Bar = document.querySelector("#aboveM17Bar");
+const printReportHeader = document.querySelector("#printReportHeader");
+const printReportCnpj = document.querySelector("#printReportCnpj");
+const printReportDate = document.querySelector("#printReportDate");
 const sidebarToggle = document.querySelector("#sidebarToggle");
 
 let baseReady = false;
 let searchLoading = false;
 let lastSuccessfulCnpj = "";
+let titleBeforePrintExport = "";
 const initialParams = new URLSearchParams(window.location.search);
 const initialCnpj = initialParams.get("cnpj") || "";
 
@@ -345,53 +349,42 @@ async function search(cnpj) {
   }
 }
 
-function downloadBlob(blob, filename) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+function updatePrintReportHeader() {
+  if (!printReportHeader) return;
+  printReportHeader.hidden = false;
+  printReportCnpj.textContent = lastSuccessfulCnpj ? formatCnpj(lastSuccessfulCnpj) : "-";
+  printReportDate.textContent = new Date().toLocaleString("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  });
 }
 
-function filenameFromDisposition(disposition, fallback) {
-  const match = /filename="?([^"]+)"?/i.exec(disposition || "");
-  return match?.[1] || fallback;
-}
-
-async function exportPdf() {
+function exportPdf() {
   if (!lastSuccessfulCnpj) {
     showMessage("Faça uma consulta antes de exportar o PDF.", "warning");
     return;
   }
 
   setActionLoading(exportPdfButton, true);
-  showMessage("Gerando PDF...", "loading");
-  try {
-    const response = await fetch(`/api/export/pdf?cnpj=${encodeURIComponent(lastSuccessfulCnpj)}`, {
-      cache: "no-store",
-    });
-    if (redirectIfUnauthorized(response)) return;
-    if (!response.ok) {
-      const error = await response.json();
-      showMessage(error.message || "Não foi possível gerar o PDF.", "warning");
-      return;
-    }
+  updatePrintReportHeader();
+  titleBeforePrintExport = document.title;
+  document.title = `consulta-cnpj-${onlyDigits(lastSuccessfulCnpj) || "cliente"}`;
+  document.body.classList.add("pdf-export-mode");
+  showMessage("Na janela de impressão, escolha Salvar como PDF.", "success");
 
-    const blob = await response.blob();
-    const filename = filenameFromDisposition(
-      response.headers.get("Content-Disposition"),
-      `consulta-cnpj-${onlyDigits(lastSuccessfulCnpj) || "cliente"}.pdf`,
-    );
-    downloadBlob(blob, filename);
-    showMessage("PDF gerado com sucesso.", "success");
-  } catch (error) {
-    showMessage("Não foi possível gerar o PDF. Tente novamente.", "warning");
-  } finally {
-    setActionLoading(exportPdfButton, false);
+  window.setTimeout(() => {
+    window.print();
+    window.setTimeout(cleanupPrintExport, 1000);
+  }, 150);
+}
+
+function cleanupPrintExport() {
+  if (titleBeforePrintExport) {
+    document.title = titleBeforePrintExport;
+    titleBeforePrintExport = "";
   }
+  document.body.classList.remove("pdf-export-mode");
+  setActionLoading(exportPdfButton, false);
 }
 
 async function refreshData() {
@@ -454,6 +447,7 @@ sidebarToggle?.addEventListener("click", () => {
 
 exportPdfButton?.addEventListener("click", exportPdf);
 refreshDataButton?.addEventListener("click", refreshData);
+window.addEventListener("afterprint", cleanupPrintExport);
 
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {

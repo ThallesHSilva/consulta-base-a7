@@ -167,6 +167,24 @@
 
         <section id="searchMessage" class="message-panel" aria-live="polite" hidden></section>
 
+        <section id="printReportHeader" class="print-report-header" aria-label="Cabeçalho do relatório" hidden>
+          <div>
+            <span class="eyebrow">A7 Connect</span>
+            <h2>Consulta por CNPJ</h2>
+            <p>Relatório gerado a partir do painel de consulta</p>
+          </div>
+          <dl>
+            <div>
+              <dt>CNPJ</dt>
+              <dd id="printReportCnpj">-</dd>
+            </div>
+            <div>
+              <dt>Gerado em</dt>
+              <dd id="printReportDate">-</dd>
+            </div>
+          </dl>
+        </section>
+
         <section id="companyPanel" class="client-card dashboard-card" aria-label="Cliente" hidden>
           <article class="client-column">
             <span class="feature-icon purple">

@@ -565,6 +565,10 @@ svg rect {
   animation: shimmer 1.25s infinite;
 }
 
+.print-report-header {
+  display: none;
+}
+
 .client-card {
   display: grid;
   grid-template-columns: 1.4fr 1fr 1fr;
@@ -1543,6 +1547,177 @@ svg rect {
   }
 }
 
+@page {
+  size: A4 landscape;
+  margin: 10mm;
+}
+
+@media print {
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  html,
+  body {
+    min-height: 0;
+    background: #fff;
+  }
+
+  body {
+    color: var(--ink);
+  }
+
+  .sidebar,
+  .page-header,
+  .search-panel,
+  #statusPanel,
+  #searchMessage,
+  .detail-button,
+  .button-spinner {
+    display: none !important;
+  }
+
+  .app-layout {
+    display: block;
+  }
+
+  .workspace {
+    display: grid;
+    gap: 0.75rem;
+    margin-left: 0;
+    padding: 0;
+  }
+
+  .print-report-header {
+    display: flex !important;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid #dfe3ee;
+    padding: 0 0 0.65rem;
+  }
+
+  .print-report-header h2 {
+    margin: 0.12rem 0 0;
+    color: var(--ink);
+    font-size: 1.25rem;
+  }
+
+  .print-report-header p {
+    margin: 0.18rem 0 0;
+    color: #596077;
+    font-size: 0.78rem;
+    font-weight: 700;
+  }
+
+  .print-report-header dl {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    gap: 0.8rem;
+    margin: 0;
+  }
+
+  .print-report-header dt {
+    color: #707891;
+    font-size: 0.64rem;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .print-report-header dd {
+    margin: 0.18rem 0 0;
+    color: var(--ink);
+    font-size: 0.78rem;
+    font-weight: 800;
+  }
+
+  .dashboard-card {
+    break-inside: avoid;
+    border-color: #dfe3ee;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 8px 22px rgba(23, 16, 62, 0.08);
+    transform: none !important;
+  }
+
+  .client-card {
+    grid-template-columns: 1.25fr 0.9fr 0.9fr;
+    border-top-width: 3px;
+  }
+
+  .client-column {
+    gap: 0.65rem;
+    padding: 0.85rem;
+  }
+
+  .feature-icon,
+  .kpi-icon,
+  .mini-icon {
+    flex: 0 0 auto;
+  }
+
+  .company-name {
+    font-size: 0.98rem;
+  }
+
+  .client-meta {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
+  .highlight-value {
+    font-size: 1rem;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+
+  .kpi-card {
+    min-height: 8.7rem;
+    padding: 0.85rem;
+  }
+
+  .metric-value {
+    margin-top: 0.1rem;
+    font-size: 1.55rem;
+  }
+
+  .sparkline {
+    width: 4.8rem;
+  }
+
+  .insights-grid {
+    display: block;
+  }
+
+  .mobile-panel {
+    padding: 0.9rem;
+  }
+
+  .mobile-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem;
+    margin-top: 0.75rem;
+  }
+
+  .mini-card {
+    padding: 0.7rem;
+  }
+
+  .fidelity-chart {
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .fidelity-row {
+    grid-template-columns: 9.5rem minmax(0, 1fr);
+    gap: 0.65rem;
+  }
+}
+
 @media (max-width: 1320px) {
   .kpi-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1739,5 +1914,34 @@ svg rect {
 
   .account-header {
     grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  .workspace {
+    gap: 0.75rem !important;
+    margin-left: 0 !important;
+    padding: 0 !important;
+  }
+
+  .client-card {
+    grid-template-columns: 1.25fr 0.9fr 0.9fr !important;
+  }
+
+  .client-column {
+    flex-direction: row !important;
+    padding: 0.85rem !important;
+  }
+
+  .kpi-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  .mobile-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .fidelity-row {
+    grid-template-columns: 9.5rem minmax(0, 1fr) !important;
   }
 }
