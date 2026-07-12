@@ -8,6 +8,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import smtplib
 import time
@@ -30,6 +31,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
+SEED_DATA_DIR = ROOT / "seed-data"
 CACHE_DIR = ROOT / ".cache"
 DB_PATH = CACHE_DIR / "consulta_base.sqlite3"
 AUTH_DB_PATH = CACHE_DIR / "auth.sqlite3"
@@ -604,6 +606,46 @@ def missing_files() -> list[str]:
         for data_file in DATA_FILES
         if data_file.get("required", True) and not data_file["path"].is_file()
     ]
+
+
+def seed_missing_data_files(
+    data_files: list[dict[str, Any]] | None = None,
+    seed_dir: Path | None = None,
+) -> list[str]:
+    selected_files = DATA_FILES if data_files is None else data_files
+    source_dir = SEED_DATA_DIR if seed_dir is None else seed_dir
+    if not source_dir.is_dir():
+        return []
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    for data_file in selected_files:
+        target = data_file["path"]
+        source = source_dir / target.name
+        try:
+            target_display = relative_display(target)
+        except ValueError:
+            target_display = str(target)
+        if target.is_file() or not source.is_file():
+            continue
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = target.with_name(
+            f".{target.name}.{secrets.token_hex(8)}.seed.tmp"
+        )
+        try:
+            shutil.copy2(source, temp_path)
+            if target.exists():
+                continue
+            os.replace(temp_path, target)
+            copied.append(target_display)
+        except OSError as error:
+            print(f"Falha ao preparar {target_display}: {error}")
+        finally:
+            if temp_path.exists():
+                temp_path.unlink()
+
+    return copied
 
 
 def database_is_current() -> bool:
@@ -1442,6 +1484,7 @@ def query_detail(value: str, detail_type: str) -> dict[str, Any]:
 
 
 def initialize_data(force_rebuild: bool = False) -> dict[str, Any]:
+    seed_missing_data_files()
     missing = missing_files()
     if missing:
         names = ", ".join(missing)

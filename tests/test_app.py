@@ -351,6 +351,28 @@ class PdfExportTest(unittest.TestCase):
 
 
 class DataUploadTest(unittest.TestCase):
+    def test_seed_copies_only_missing_data_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            seed_dir = root / "seed"
+            target_dir = root / "data"
+            seed_dir.mkdir()
+            target_dir.mkdir()
+            source = seed_dir / "BASE.csv"
+            target = target_dir / "BASE.csv"
+            source.write_text("versao inicial", encoding="utf-8")
+            data_files = [{"path": target}]
+
+            copied = app.seed_missing_data_files(data_files, seed_dir)
+            target.write_text("versao atualizada", encoding="utf-8")
+            source.write_text("nova versao inicial", encoding="utf-8")
+            copied_again = app.seed_missing_data_files(data_files, seed_dir)
+            final_content = target.read_text(encoding="utf-8")
+
+        self.assertEqual(copied, [str(target)])
+        self.assertEqual(copied_again, [])
+        self.assertEqual(final_content, "versao atualizada")
+
     def test_validate_uploaded_csv_headers_accepts_expected_cnpj_column(self):
         headers = app.validate_uploaded_csv_headers(
             b"NR_CNPJ;NM_CLIENTE\n12;Cliente\n",

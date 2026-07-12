@@ -63,6 +63,7 @@ Observacoes importantes:
 - Configure `PUBLIC_BASE_URL` para que os links de redefinicao de senha saiam com o dominio correto.
 - Use `SESSION_COOKIE_SECURE=1` somente quando o acesso externo estiver em HTTPS.
 - O painel administrativo possui upload semanal dos CSVs em `POST /api/admin/data/upload`; o envio exige usuario `ADMIN`.
+- A imagem Docker inclui uma copia inicial das bases em `/app/seed-data`. Na inicializacao, somente arquivos ausentes sao copiados para `/app/data`; arquivos atualizados pelo administrador nunca sao sobrescritos.
 - `MAX_UPLOAD_BYTES` define o limite do endpoint de upload. O padrao e 300 MB.
 - `APP_TIMEZONE` define o fuso usado nos relatorios diarios e mensais. O padrao e `America/Sao_Paulo`.
 - A pagina `/admin/relatorios` mostra o ranking de uso por usuario e exige perfil `ADMIN`.
