@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Validar e-mail - A7 Connect</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-shell single">
+      <section class="auth-card dashboard-card auth-state-card">
+        <img class="auth-logo small" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+        <span id="confirmEmailBadge" class="badge neutral">VALIDANDO</span>
+        <h1 id="confirmEmailTitle">Validando seu e-mail</h1>
+        <p id="confirmEmailMessage" aria-live="polite">Aguarde enquanto verificamos o link.</p>
+        <a id="confirmEmailLoginLink" class="gradient-button auth-submit" href="/login" hidden>
+          Voltar para login
+        </a>
+      </section>
+    </main>
+    <script src="/static/auth.js"></script>
+  </body>
+</html>

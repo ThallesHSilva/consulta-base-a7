@@ -96,26 +96,34 @@
           <div class="panel-title-row">
             <div>
               <span class="eyebrow">Bases CSV</span>
-              <h2>Atualização de bases</h2>
+              <h2>Importação de bases</h2>
             </div>
             <span class="badge neutral">Acesso administrador</span>
           </div>
+          <p class="team-description">
+            As bases ficam armazenadas somente no servidor e podem ser enviadas juntas ou em etapas.
+            MAPA PARQUE, PARQUE MÓVEL e PARQUE FIXA são obrigatórias para liberar as consultas.
+          </p>
           <form id="dataUploadForm" class="data-upload-form" enctype="multipart/form-data">
             <div class="upload-grid">
               <label class="file-upload">
                 <span>MAPA PARQUE.csv</span>
+                <small>Obrigatória</small>
                 <input id="uploadMapaParque" name="mapa_parque" type="file" accept=".csv,text/csv" />
               </label>
               <label class="file-upload">
                 <span>PARQUE MOVEL.csv</span>
+                <small>Obrigatória</small>
                 <input id="uploadParqueMovel" name="parque_movel" type="file" accept=".csv,text/csv" />
               </label>
               <label class="file-upload">
                 <span>PARQUE FIXA.csv</span>
+                <small>Obrigatória</small>
                 <input id="uploadParqueFixa" name="parque_fixa" type="file" accept=".csv,text/csv" />
               </label>
               <label class="file-upload">
                 <span>RECOMENDAÇÃO FIXA.csv</span>
+                <small>Opcional</small>
                 <input
                   id="uploadRecomendacaoFixa"
                   name="recomendacao_fixa"
@@ -125,6 +133,7 @@
               </label>
               <label class="file-upload">
                 <span>RECOMENDAÇÃO MÓVEL.csv</span>
+                <small>Opcional</small>
                 <input
                   id="uploadRecomendacaoMovel"
                   name="recomendacao_movel"
@@ -177,6 +186,26 @@
           </button>
         </section>
 
+        <section class="dashboard-card team-panel" aria-label="Gestão de equipes">
+          <div class="panel-title-row">
+            <div>
+              <span class="eyebrow">Organização</span>
+              <h2>Equipes</h2>
+            </div>
+            <span id="adminTeamsCount" class="badge neutral">0 equipes</span>
+          </div>
+          <p class="team-description">Crie equipes para organizar os perfis cadastrados.</p>
+          <form id="teamForm" class="team-form">
+            <label>
+              <span>Nome da equipe</span>
+              <input id="teamNameInput" type="text" maxlength="80" placeholder="Ex.: Comercial SP" required />
+            </label>
+            <button class="gradient-button" type="submit">Criar equipe</button>
+          </form>
+          <p id="teamMessage" class="auth-message" aria-live="polite" hidden></p>
+          <div id="teamsList" class="teams-list"></div>
+        </section>
+
         <section class="dashboard-card admin-panel" aria-label="Usuários cadastrados">
           <div class="panel-title-row">
             <div>
@@ -192,6 +221,7 @@
                 <tr>
                   <th>Usuário</th>
                   <th>Perfil</th>
+                  <th>Equipe</th>
                   <th>Status</th>
                   <th>Criação</th>
                   <th>Último login</th>

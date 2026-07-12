@@ -37,7 +37,7 @@
             </svg>
             <span>Histórico</span>
           </a>
-          <a id="adminNavItem" class="nav-item" href="/admin/usuarios" title="Painel Administrativo">
+          <a id="adminNavItem" class="nav-item" href="/admin/usuarios" title="Painel Administrativo" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
@@ -87,8 +87,8 @@
           </button>
           <div class="title-stack">
             <span class="eyebrow">Relatórios</span>
-            <h1>Ranking de utilização</h1>
-            <p>Acompanhe consultas por usuário e recência de uso da plataforma.</p>
+            <h1>Inteligência de utilização</h1>
+            <p id="reportsScopeText">Acompanhe adoção, clientes consultados e desempenho de usuários e equipes.</p>
           </div>
           <div class="header-actions">
             <button id="reportsRefreshButton" class="ghost-button" type="button" title="Atualizar relatório">
@@ -113,12 +113,34 @@
             <strong id="monthlyQueriesValue">0</strong>
           </article>
           <article class="dashboard-card report-summary-card">
-            <span>Consultas totais</span>
-            <strong id="totalQueriesValue">0</strong>
+            <span>Clientes únicos no mês</span>
+            <strong id="uniqueClientsValue">0</strong>
           </article>
           <article class="dashboard-card report-summary-card">
-            <span>Usuários monitorados</span>
-            <strong id="usersTrackedValue">0</strong>
+            <span>Adoção no mês</span>
+            <strong id="adoptionValue">0%</strong>
+          </article>
+        </section>
+
+        <section class="reports-analytics-grid">
+          <article class="dashboard-card analytics-card">
+            <div class="panel-title-row"><div><span class="eyebrow">Evolução</span><h2>Consultas nos últimos 14 dias</h2></div></div>
+            <div id="dailyTrendChart" class="bar-chart" aria-label="Consultas nos últimos 14 dias"></div>
+          </article>
+          <article class="dashboard-card analytics-card">
+            <div class="panel-title-row"><div><span class="eyebrow">Comportamento</span><h2>Uso por horário</h2></div></div>
+            <div id="hourlyUsageChart" class="bar-chart compact" aria-label="Consultas por horário"></div>
+          </article>
+        </section>
+
+        <section class="reports-analytics-grid">
+          <article class="dashboard-card analytics-card">
+            <div class="panel-title-row"><div><span class="eyebrow">Equipes</span><h2>Desempenho no mês</h2></div></div>
+            <div id="teamsRanking" class="report-list"></div>
+          </article>
+          <article class="dashboard-card analytics-card">
+            <div class="panel-title-row"><div><span class="eyebrow">Interesse</span><h2>Clientes mais consultados</h2></div></div>
+            <div id="topClients" class="report-list"></div>
           </article>
         </section>
 
@@ -137,8 +159,10 @@
                 <tr>
                   <th>#</th>
                   <th>Usuário</th>
+                  <th>Equipe</th>
                   <th>Hoje</th>
                   <th>Mês</th>
+                  <th>Clientes únicos/mês</th>
                   <th>Total</th>
                   <th>Última consulta</th>
                   <th>Último login</th>

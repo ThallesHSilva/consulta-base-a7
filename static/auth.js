@@ -4,12 +4,23 @@ const registerForm = document.querySelector("#registerForm");
 const forgotPasswordForm = document.querySelector("#forgotPasswordForm");
 const resetPasswordForm = document.querySelector("#resetPasswordForm");
 const pendingMessage = document.querySelector("#pendingMessage");
+const resendVerificationButton = document.querySelector("#resendVerificationButton");
+const emailVerificationMessage = document.querySelector("#emailVerificationMessage");
+const confirmEmailBadge = document.querySelector("#confirmEmailBadge");
+const confirmEmailTitle = document.querySelector("#confirmEmailTitle");
+const confirmEmailMessage = document.querySelector("#confirmEmailMessage");
+const confirmEmailLoginLink = document.querySelector("#confirmEmailLoginLink");
 const adminSearchInput = document.querySelector("#adminSearchInput");
 const adminStatusFilter = document.querySelector("#adminStatusFilter");
 const adminRefreshButton = document.querySelector("#adminRefreshButton");
 const adminUsersBody = document.querySelector("#adminUsersBody");
 const adminUsersCount = document.querySelector("#adminUsersCount");
 const adminMessage = document.querySelector("#adminMessage");
+const teamForm = document.querySelector("#teamForm");
+const teamNameInput = document.querySelector("#teamNameInput");
+const teamMessage = document.querySelector("#teamMessage");
+const teamsList = document.querySelector("#teamsList");
+const adminTeamsCount = document.querySelector("#adminTeamsCount");
 const dataUploadForm = document.querySelector("#dataUploadForm");
 const dataUploadButton = document.querySelector("#dataUploadButton");
 const dataUploadMessage = document.querySelector("#dataUploadMessage");
@@ -91,12 +102,19 @@ function statusLabel(status) {
   }[status] || status || "-";
 }
 
+function profileLabel(profile) {
+  return {
+    ADMIN: "Administrador",
+    SUPERVISOR: "Supervisor",
+    USUARIO: "Usuário",
+  }[profile] || profile || "-";
+}
+
 function userActions(user) {
   if (user.status === "PENDENTE_APROVACAO") {
-    return [
-      ["aprovar", "Aprovar"],
-      ["cancelar", "Cancelar"],
-    ];
+    const actions = [["cancelar", "Cancelar"]];
+    if (user.email_confirmado) actions.unshift(["aprovar", "Aprovar"]);
+    return actions;
   }
   if (user.status === "ATIVO") {
     return [
@@ -123,7 +141,7 @@ function renderUsers(users) {
   if (!users.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 6;
+    cell.colSpan = 7;
     cell.className = "admin-empty-cell";
     cell.textContent = "Nenhum usuário encontrado.";
     row.appendChild(cell);
@@ -139,10 +157,30 @@ function renderUsers(users) {
     nameEl.textContent = user.nome_completo;
     const emailEl = document.createElement("span");
     emailEl.textContent = user.email;
-    userCell.append(nameEl, emailEl);
+    const emailStatusEl = document.createElement("span");
+    emailStatusEl.className = user.email_confirmado ? "email-verified" : "email-pending";
+    emailStatusEl.textContent = user.email_confirmado ? "E-mail confirmado" : "E-mail não confirmado";
+    userCell.append(nameEl, emailEl, emailStatusEl);
 
     const profileCell = document.createElement("td");
-    profileCell.textContent = user.perfil === "ADMIN" ? "Administrador" : "Usuário";
+    const profileSelect = document.createElement("select");
+    profileSelect.className = "team-select";
+    profileSelect.setAttribute("aria-label", `Perfil de ${user.nome_completo}`);
+    ["ADMIN", "SUPERVISOR", "USUARIO"].forEach((profile) => {
+      profileSelect.add(new Option(profileLabel(profile), profile));
+    });
+    profileSelect.value = user.perfil;
+    profileSelect.addEventListener("change", () => assignProfile(user.id, profileSelect.value, profileSelect));
+    profileCell.appendChild(profileSelect);
+    const teamCell = document.createElement("td");
+    const teamSelect = document.createElement("select");
+    teamSelect.className = "team-select";
+    teamSelect.setAttribute("aria-label", `Equipe de ${user.nome_completo}`);
+    teamSelect.add(new Option("Sem equipe", ""));
+    adminTeams.forEach((team) => teamSelect.add(new Option(team.nome, String(team.id))));
+    teamSelect.value = user.equipe_id == null ? "" : String(user.equipe_id);
+    teamSelect.addEventListener("change", () => assignTeam(user.id, teamSelect.value, teamSelect));
+    teamCell.appendChild(teamSelect);
 
     const statusCell = document.createElement("td");
     const badge = document.createElement("span");
@@ -170,9 +208,56 @@ function renderUsers(users) {
       actionCell.textContent = "-";
     }
 
-    row.append(userCell, profileCell, statusCell, createdCell, loginCell, actionCell);
+    row.append(userCell, profileCell, teamCell, statusCell, createdCell, loginCell, actionCell);
     adminUsersBody.appendChild(row);
   });
+}
+
+let adminTeams = [];
+
+function renderTeams() {
+  if (adminTeamsCount) adminTeamsCount.textContent = `${adminTeams.length} equipe(s)`;
+  if (!teamsList) return;
+  teamsList.innerHTML = "";
+  adminTeams.forEach((team) => {
+    const item = document.createElement("span");
+    item.className = "team-chip";
+    item.textContent = `${team.nome} · ${team.total_membros} membro(s)`;
+    teamsList.appendChild(item);
+  });
+}
+
+async function loadTeams() {
+  const response = await fetch("/api/admin/teams", { cache: "no-store" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.message || "Não foi possível carregar as equipes.");
+  adminTeams = data.teams || [];
+  renderTeams();
+}
+
+async function assignTeam(userId, teamId, select) {
+  select.disabled = true;
+  const { response, data } = await postJson("/api/admin/users/team", { user_id: userId, equipe_id: teamId });
+  showAuthMessage(data.message, response.ok ? "success" : "error", adminMessage);
+  select.disabled = false;
+  if (response.ok) await refreshAdminManagement();
+  else await loadAdminUsers();
+}
+
+async function assignProfile(userId, profile, select) {
+  select.disabled = true;
+  const { response, data } = await postJson("/api/admin/users/profile", {
+    user_id: userId,
+    perfil: profile,
+  });
+  showAuthMessage(data.message, response.ok ? "success" : "error", adminMessage);
+  select.disabled = false;
+  await loadAdminUsers();
+}
+
+async function refreshAdminManagement() {
+  await loadTeams();
+  await loadAdminUsers();
 }
 
 function renderDataUploadSummary(data) {
@@ -287,6 +372,7 @@ dataUploadForm?.addEventListener("submit", async (event) => {
 loginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   hideAuthMessage();
+  if (resendVerificationButton) resendVerificationButton.hidden = true;
   setSubmitLoading(loginForm, true);
   const { response, data } = await postJson("/api/auth/login", {
     email: document.querySelector("#loginEmail").value,
@@ -295,6 +381,10 @@ loginForm?.addEventListener("submit", async (event) => {
   setSubmitLoading(loginForm, false);
   if (!response.ok) {
     showAuthMessage(data.message || "E-mail ou senha inválidos.");
+    if (data.code === "EMAIL_NAO_CONFIRMADO" && resendVerificationButton) {
+      sessionStorage.setItem("verificationEmail", document.querySelector("#loginEmail").value);
+      resendVerificationButton.hidden = false;
+    }
     return;
   }
   window.location.href = data.redirect || "/app";
@@ -316,8 +406,44 @@ registerForm?.addEventListener("submit", async (event) => {
     return;
   }
   sessionStorage.setItem("pendingMessage", data.message);
-  window.location.href = "/aguardando-aprovacao";
+  sessionStorage.setItem("verificationEmail", document.querySelector("#registerEmail").value);
+  window.location.href = "/verifique-email";
 });
+
+resendVerificationButton?.addEventListener("click", async () => {
+  const email = sessionStorage.getItem("verificationEmail")
+    || document.querySelector("#loginEmail")?.value
+    || "";
+  const target = emailVerificationMessage || authMessage;
+  if (!email) {
+    showAuthMessage("Informe o e-mail usado no cadastro.", "error", target);
+    return;
+  }
+  resendVerificationButton.disabled = true;
+  const { data } = await postJson("/api/auth/email/resend", { email });
+  resendVerificationButton.disabled = false;
+  showAuthMessage(data.message, "success", target);
+});
+
+async function validateEmailLink() {
+  if (!confirmEmailMessage) return;
+  const params = new URLSearchParams(window.location.search);
+  const { response, data } = await postJson("/api/auth/email/confirm", {
+    token: params.get("token") || "",
+  });
+  confirmEmailMessage.textContent = data.message || "Não foi possível validar o e-mail.";
+  if (response.ok && data.ok) {
+    confirmEmailBadge.textContent = "E-MAIL CONFIRMADO";
+    confirmEmailBadge.className = "badge success";
+    confirmEmailTitle.textContent = "E-mail confirmado";
+    sessionStorage.removeItem("verificationEmail");
+  } else {
+    confirmEmailBadge.textContent = "LINK INVÁLIDO";
+    confirmEmailBadge.className = "badge danger";
+    confirmEmailTitle.textContent = "Não foi possível confirmar";
+  }
+  confirmEmailLoginLink.hidden = false;
+}
 
 forgotPasswordForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -363,6 +489,19 @@ adminSearchInput?.addEventListener("input", () => {
 adminStatusFilter?.addEventListener("change", loadAdminUsers);
 adminRefreshButton?.addEventListener("click", loadAdminUsers);
 
+teamForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  hideAuthMessage(teamMessage);
+  setSubmitLoading(teamForm, true);
+  const { response, data } = await postJson("/api/admin/teams", { nome: teamNameInput.value });
+  setSubmitLoading(teamForm, false);
+  showAuthMessage(data.message, response.ok ? "success" : "error", teamMessage);
+  if (response.ok) {
+    teamForm.reset();
+    await refreshAdminManagement();
+  }
+});
+
 sidebarToggleAuth?.addEventListener("click", () => {
   document.body.classList.toggle("sidebar-open");
 });
@@ -373,4 +512,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-loadAdminUsers();
+if (adminUsersBody) {
+  refreshAdminManagement().catch((error) => showAuthMessage(error.message, "error", adminMessage));
+}
+
+validateEmailLink();

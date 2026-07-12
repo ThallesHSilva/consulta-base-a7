@@ -4,7 +4,6 @@ WORKDIR /app
 
 COPY app.py .
 COPY static/ static/
-COPY data/ seed-data/
 
 RUN mkdir -p data .cache
 

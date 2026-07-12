@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import unittest
@@ -342,6 +343,134 @@ class AuthSecurityTest(unittest.TestCase):
         )
         self.assertEqual(app.validate_password_strength("Senha1234"), "")
 
+    def test_initial_admin_uses_environment_configuration(self):
+        original_auth_db_path = app.AUTH_DB_PATH
+        original_cache_dir = app.CACHE_DIR
+        original_values = {
+            key: os.environ.get(key)
+            for key in ("ADMIN_NAME", "ADMIN_EMAIL", "ADMIN_PASSWORD")
+        }
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                app.CACHE_DIR = Path(temp_dir)
+                app.AUTH_DB_PATH = app.CACHE_DIR / "auth.sqlite3"
+                os.environ["ADMIN_NAME"] = "Admin Teste"
+                os.environ["ADMIN_EMAIL"] = "admin.teste@example.com"
+                os.environ["ADMIN_PASSWORD"] = "SenhaAdmin123"
+                app.initialize_auth_database()
+                with app.open_auth_db() as conn:
+                    admin = app.fetch_user_by_email(conn, "admin.teste@example.com")
+                self.assertEqual(admin["nome_completo"], "Admin Teste")
+                self.assertEqual(admin["perfil"], "ADMIN")
+                self.assertTrue(admin["email_confirmado_em"])
+                self.assertTrue(app.verify_password("SenhaAdmin123", admin["senha_hash"]))
+                self.assertFalse((app.CACHE_DIR / "admin_credentials.txt").exists())
+            finally:
+                app.AUTH_DB_PATH = original_auth_db_path
+                app.CACHE_DIR = original_cache_dir
+                for key, value in original_values.items():
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+
+
+class EmailVerificationTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_auth_db_path = app.AUTH_DB_PATH
+        self.original_cache_dir = app.CACHE_DIR
+        self.original_admin_password = os.environ.get("ADMIN_PASSWORD")
+        self.original_smtp_host = os.environ.pop("SMTP_HOST", None)
+        os.environ["ADMIN_PASSWORD"] = "Senha1234"
+        app.CACHE_DIR = Path(self.temp_dir.name)
+        app.AUTH_DB_PATH = app.CACHE_DIR / "auth.sqlite3"
+        app.initialize_auth_database()
+
+    def tearDown(self):
+        app.AUTH_DB_PATH = self.original_auth_db_path
+        app.CACHE_DIR = self.original_cache_dir
+        if self.original_admin_password is None:
+            os.environ.pop("ADMIN_PASSWORD", None)
+        else:
+            os.environ["ADMIN_PASSWORD"] = self.original_admin_password
+        if self.original_smtp_host is not None:
+            os.environ["SMTP_HOST"] = self.original_smtp_host
+        self.temp_dir.cleanup()
+
+    def register_user(self):
+        return app.create_pending_user(
+            {
+                "nome_completo": "Maria Supervisora",
+                "email": "maria@example.com",
+                "senha": "Senha1234",
+                "senha_confirmacao": "Senha1234",
+            },
+            "127.0.0.1",
+            "tests",
+            "http://127.0.0.1:8000",
+        )
+
+    def verification_token_from_outbox(self):
+        files = list((app.CACHE_DIR / "email_verification_outbox").glob("*.txt"))
+        self.assertTrue(files)
+        newest = max(files, key=lambda path: path.stat().st_mtime_ns)
+        content = newest.read_text(encoding="utf-8")
+        match = re.search(r"confirmar-email\?token=([^\s]+)", content)
+        self.assertIsNotNone(match)
+        return match.group(1)
+
+    def test_email_must_be_confirmed_before_approval_and_login(self):
+        ok, message = self.register_user()
+        self.assertTrue(ok)
+        self.assertIn("validação", message)
+
+        with app.open_auth_db() as conn:
+            user = app.fetch_user_by_email(conn, "maria@example.com")
+            user_id = user["id"]
+            self.assertIsNone(user["email_confirmado_em"])
+
+        status, response, token = app.authenticate_user(
+            "maria@example.com", "Senha1234", "127.0.0.1", "tests"
+        )
+        self.assertEqual(status, app.HTTPStatus.FORBIDDEN)
+        self.assertEqual(response["code"], "EMAIL_NAO_CONFIRMADO")
+        self.assertIsNone(token)
+
+        status, response = app.update_user_status({"id": 1}, user_id, "aprovar")
+        self.assertEqual(status, app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("confirmar", response["message"].lower())
+
+        verification_token = self.verification_token_from_outbox()
+        status, response = app.confirm_email(verification_token)
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+
+        status, response = app.update_user_status({"id": 1}, user_id, "aprovar")
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+        status, response, session_token = app.authenticate_user(
+            "maria@example.com", "Senha1234", "127.0.0.1", "tests"
+        )
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(session_token)
+
+    def test_resend_invalidates_previous_verification_token(self):
+        self.register_user()
+        first_token = self.verification_token_from_outbox()
+        response = app.request_email_verification(
+            "maria@example.com", "127.0.0.1", "tests", "http://127.0.0.1:8000"
+        )
+        self.assertTrue(response["ok"])
+        second_token = self.verification_token_from_outbox()
+        self.assertNotEqual(first_token, second_token)
+
+        status, _ = app.confirm_email(first_token)
+        self.assertEqual(status, app.HTTPStatus.BAD_REQUEST)
+        status, response = app.confirm_email(second_token)
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+
 
 class PdfExportTest(unittest.TestCase):
     def test_simple_pdf_has_pdf_signature(self):
@@ -351,27 +480,90 @@ class PdfExportTest(unittest.TestCase):
 
 
 class DataUploadTest(unittest.TestCase):
-    def test_seed_copies_only_missing_data_file(self):
+    def test_empty_install_starts_without_bundled_bases(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            seed_dir = root / "seed"
-            target_dir = root / "data"
-            seed_dir.mkdir()
-            target_dir.mkdir()
-            source = seed_dir / "BASE.csv"
-            target = target_dir / "BASE.csv"
-            source.write_text("versao inicial", encoding="utf-8")
-            data_files = [{"path": target}]
+            original_root = app.ROOT
+            original_data_dir = app.DATA_DIR
+            original_data_files = app.DATA_FILES
+            original_file_by_key = app.DATA_FILE_BY_KEY
+            original_state = app.APP_STATE
+            try:
+                app.ROOT = root
+                app.DATA_DIR = root / "data"
+                app.DATA_FILES = [
+                    {
+                        "key": "base_a",
+                        "label": "BASE A",
+                        "path": app.DATA_DIR / "BASE A.csv",
+                        "cnpj_columns": ["DOCUMENTO"],
+                        "cliente_columns": [],
+                    }
+                ]
+                app.DATA_FILE_BY_KEY = {item["key"]: item for item in app.DATA_FILES}
+                state = app.initialize_data()
+                data_dir_created = app.DATA_DIR.is_dir()
+            finally:
+                app.ROOT = original_root
+                app.DATA_DIR = original_data_dir
+                app.DATA_FILES = original_data_files
+                app.DATA_FILE_BY_KEY = original_file_by_key
+                app.APP_STATE = original_state
 
-            copied = app.seed_missing_data_files(data_files, seed_dir)
-            target.write_text("versao atualizada", encoding="utf-8")
-            source.write_text("nova versao inicial", encoding="utf-8")
-            copied_again = app.seed_missing_data_files(data_files, seed_dir)
-            final_content = target.read_text(encoding="utf-8")
+        self.assertFalse(state["ready"])
+        self.assertEqual(state["missing_files"], ["data/BASE A.csv"])
+        self.assertTrue(data_dir_created)
 
-        self.assertEqual(copied, [str(target)])
-        self.assertEqual(copied_again, [])
-        self.assertEqual(final_content, "versao atualizada")
+    def test_partial_admin_upload_is_saved_while_other_required_base_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            original_root = app.ROOT
+            original_data_dir = app.DATA_DIR
+            original_data_files = app.DATA_FILES
+            original_file_by_key = app.DATA_FILE_BY_KEY
+            original_state = app.APP_STATE
+            try:
+                app.ROOT = root
+                app.DATA_DIR = root / "data"
+                app.DATA_FILES = [
+                    {
+                        "key": "base_a",
+                        "label": "BASE A",
+                        "path": app.DATA_DIR / "BASE A.csv",
+                        "cnpj_columns": ["DOCUMENTO"],
+                        "cliente_columns": [],
+                    },
+                    {
+                        "key": "base_b",
+                        "label": "BASE B",
+                        "path": app.DATA_DIR / "BASE B.csv",
+                        "cnpj_columns": ["DOCUMENTO"],
+                        "cliente_columns": [],
+                    },
+                ]
+                app.DATA_FILE_BY_KEY = {item["key"]: item for item in app.DATA_FILES}
+                status, response = app.save_uploaded_data_files(
+                    [
+                        {
+                            "name": "base_a",
+                            "filename": "BASE A.csv",
+                            "content": b"DOCUMENTO;CLIENTE\n12;Cliente\n",
+                        }
+                    ]
+                )
+                file_saved = (app.DATA_DIR / "BASE A.csv").is_file()
+            finally:
+                app.ROOT = original_root
+                app.DATA_DIR = original_data_dir
+                app.DATA_FILES = original_data_files
+                app.DATA_FILE_BY_KEY = original_file_by_key
+                app.APP_STATE = original_state
+
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+        self.assertFalse(response["ready"])
+        self.assertIn("data/BASE B.csv", response["message"])
+        self.assertTrue(file_saved)
 
     def test_validate_uploaded_csv_headers_accepts_expected_cnpj_column(self):
         headers = app.validate_uploaded_csv_headers(
@@ -434,6 +626,29 @@ class SearchHistoryTest(unittest.TestCase):
             os.environ["ADMIN_PASSWORD"] = self.original_admin_password
         self.temp_dir.cleanup()
 
+    def create_active_user(self, name, email, team_id=None, profile="USUARIO"):
+        with app.open_auth_db() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO users (
+                    nome_completo, email, email_confirmado_em, senha_hash, perfil, status,
+                    data_criacao, data_aprovacao, equipe_id
+                ) VALUES (?, ?, ?, ?, ?, 'ATIVO', ?, ?, ?)
+                """,
+                (
+                    name,
+                    email,
+                    app.utc_iso(),
+                    app.hash_password("Senha1234"),
+                    profile,
+                    app.utc_iso(),
+                    app.utc_iso(),
+                    team_id,
+                ),
+            )
+            conn.commit()
+            return cursor.lastrowid
+
     def test_history_keeps_only_latest_15_items(self):
         for index in range(16):
             cnpj = f"12.345.678/0001-{index:02d}"
@@ -465,6 +680,92 @@ class SearchHistoryTest(unittest.TestCase):
         self.assertEqual(items[0]["company_name"], "Cliente Atualizado")
         self.assertTrue(items[0]["found"])
 
+    def test_admin_can_create_team_and_assign_user(self):
+        status, created = app.create_team("Comercial SP")
+        self.assertEqual(status, app.HTTPStatus.CREATED)
+        team_id = created["team"]["id"]
+
+        status, response = app.assign_user_team(1, team_id)
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+        user = next(item for item in app.list_users() if item["id"] == 1)
+        self.assertEqual(user["equipe_id"], team_id)
+        self.assertEqual(user["equipe_nome"], "Comercial SP")
+        self.assertEqual(app.list_teams()[0]["total_membros"], 1)
+
+    def test_user_can_be_removed_from_team(self):
+        _, created = app.create_team("Suporte")
+        app.assign_user_team(1, created["team"]["id"])
+        status, _ = app.assign_user_team(1, None)
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertIsNone(app.list_users()[0]["equipe_id"])
+
+    def test_supervisor_profile_requires_and_keeps_a_team(self):
+        user_id = self.create_active_user("Supervisora", "supervisora@example.com")
+        status, response = app.assign_user_profile({"id": 1}, user_id, "SUPERVISOR")
+        self.assertEqual(status, app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("equipe", response["message"].lower())
+
+        _, created = app.create_team("Equipe Centro")
+        team_id = created["team"]["id"]
+        app.assign_user_team(user_id, team_id)
+        status, response = app.assign_user_profile({"id": 1}, user_id, "SUPERVISOR")
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+        supervisor = next(item for item in app.list_users() if item["id"] == user_id)
+        self.assertEqual(supervisor["perfil"], "SUPERVISOR")
+
+        with app.open_auth_db() as conn:
+            token = app.create_session(conn, user_id, "127.0.0.1", "tests")
+        session_user = app.lookup_session_user(token)
+        self.assertEqual(session_user["equipe_id"], team_id)
+        self.assertEqual(session_user["equipe_nome"], "Equipe Centro")
+
+        status, response = app.assign_user_team(user_id, None)
+        self.assertEqual(status, app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("equipe", response["message"].lower())
+
+    def test_supervisor_report_contains_only_own_team(self):
+        _, team_a = app.create_team("Equipe A")
+        _, team_b = app.create_team("Equipe B")
+        team_a_id = team_a["team"]["id"]
+        team_b_id = team_b["team"]["id"]
+        supervisor_id = self.create_active_user(
+            "Supervisor A", "supervisor-a@example.com", team_a_id, "SUPERVISOR"
+        )
+        member_a_id = self.create_active_user(
+            "Pessoa A", "pessoa-a@example.com", team_a_id
+        )
+        member_b_id = self.create_active_user(
+            "Pessoa B", "pessoa-b@example.com", team_b_id
+        )
+        app.save_search_history(
+            supervisor_id,
+            "11.111.111/0001-11",
+            {"query": "11.111.111/0001-11", "total": 1, "company_name": "Cliente A"},
+        )
+        app.save_search_history(
+            member_a_id,
+            "22.222.222/0001-22",
+            {"query": "22.222.222/0001-22", "total": 1, "company_name": "Cliente B"},
+        )
+        app.save_search_history(
+            member_b_id,
+            "33.333.333/0001-33",
+            {"query": "33.333.333/0001-33", "total": 1, "company_name": "Cliente externo"},
+        )
+
+        report = app.usage_ranking_report(team_a_id, "Equipe A")
+        self.assertEqual(report["scope"]["type"], "team")
+        self.assertEqual(report["scope"]["team_name"], "Equipe A")
+        self.assertEqual(
+            {item["nome_completo"] for item in report["items"]},
+            {"Supervisor A", "Pessoa A"},
+        )
+        self.assertEqual(report["summary"]["consultas_totais"], 2)
+        self.assertEqual([team["equipe"] for team in report["teams"]], ["Equipe A"])
+        self.assertNotIn("Cliente externo", [client["cliente"] for client in report["top_clients"]])
+
     def test_usage_report_counts_repeated_consultations(self):
         app.save_search_history(
             1,
@@ -482,7 +783,13 @@ class SearchHistoryTest(unittest.TestCase):
         self.assertEqual(admin["consultas_totais"], 2)
         self.assertEqual(admin["consultas_mensais"], 2)
         self.assertEqual(admin["consultas_diarias"], 2)
+        self.assertEqual(admin["clientes_unicos_mes"], 1)
         self.assertEqual(admin["posicao"], 1)
+        self.assertEqual(report["summary"]["clientes_unicos_mes"], 1)
+        self.assertEqual(report["summary"]["adocao_mensal"], 100.0)
+        self.assertEqual(sum(item["consultas"] for item in report["daily_trend"]), 2)
+        self.assertEqual(report["top_clients"][0]["consultas"], 2)
+        self.assertEqual(report["teams"][0]["equipe"], "Sem equipe")
 
 
 if __name__ == "__main__":

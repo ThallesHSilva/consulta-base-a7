@@ -40,10 +40,15 @@
     }
 
     if (userName) userName.textContent = user.nome_completo || "Usuário";
-    if (userRole) userRole.textContent = user.perfil === "ADMIN" ? "Administrador" : "Usuário";
+    const roleLabels = {
+      ADMIN: "Administrador",
+      SUPERVISOR: "Supervisor",
+      USUARIO: "Usuário",
+    };
+    if (userRole) userRole.textContent = roleLabels[user.perfil] || user.perfil || "Perfil";
     if (userInitials) userInitials.textContent = initials(user.nome_completo);
     if (adminNavItem) adminNavItem.hidden = user.perfil !== "ADMIN";
-    if (adminReportsNavItem) adminReportsNavItem.hidden = user.perfil !== "ADMIN";
+    if (adminReportsNavItem) adminReportsNavItem.hidden = !["ADMIN", "SUPERVISOR"].includes(user.perfil);
   } catch (error) {
     window.location.href = "/login";
   }

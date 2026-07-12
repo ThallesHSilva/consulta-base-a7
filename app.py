@@ -8,7 +8,6 @@ import json
 import os
 import re
 import secrets
-import shutil
 import sqlite3
 import smtplib
 import time
@@ -31,7 +30,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
-SEED_DATA_DIR = ROOT / "seed-data"
 CACHE_DIR = ROOT / ".cache"
 DB_PATH = CACHE_DIR / "consulta_base.sqlite3"
 AUTH_DB_PATH = CACHE_DIR / "auth.sqlite3"
@@ -43,11 +41,19 @@ PASSWORD_RESET_MINUTES = 30
 PASSWORD_RESET_WINDOW_SECONDS = 15 * 60
 PASSWORD_RESET_EMAIL_LIMIT = 3
 PASSWORD_RESET_IP_LIMIT = 10
+EMAIL_VERIFICATION_HOURS = 24
+EMAIL_VERIFICATION_WINDOW_SECONDS = 15 * 60
+EMAIL_VERIFICATION_EMAIL_LIMIT = 3
+EMAIL_VERIFICATION_IP_LIMIT = 10
 PASSWORD_HASH_ITERATIONS = 260_000
 AUTH_STATUSES = {"PENDENTE_APROVACAO", "ATIVO", "BLOQUEADO", "CANCELADO"}
-AUTH_PROFILES = {"ADMIN", "USUARIO"}
+AUTH_PROFILES = {"ADMIN", "SUPERVISOR", "USUARIO"}
+REPORT_PROFILES = {"ADMIN", "SUPERVISOR"}
 GENERIC_RESET_MESSAGE = (
     "Se o e-mail estiver cadastrado, enviaremos as instruções para redefinição de senha."
+)
+GENERIC_VERIFICATION_MESSAGE = (
+    "Se o e-mail estiver cadastrado e ainda não confirmado, enviaremos um novo link de validação."
 )
 DB_TIMEOUT_SECONDS = 30
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(300 * 1024 * 1024)))
@@ -236,6 +242,10 @@ def public_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         "data_bloqueio": row["data_bloqueio"],
         "data_cancelamento": row["data_cancelamento"],
         "ultimo_login": row["ultimo_login"],
+        "email_confirmado_em": row["email_confirmado_em"],
+        "email_confirmado": bool(row["email_confirmado_em"]),
+        "equipe_id": row["equipe_id"],
+        "equipe_nome": row["equipe_nome"] if "equipe_nome" in row.keys() else "",
     }
 
 
@@ -570,15 +580,18 @@ def save_uploaded_data_files(parts: list[dict[str, Any]]) -> tuple[HTTPStatus, d
                 temp_path.unlink()
 
     state = refresh_data(force_rebuild=True)
-    status = HTTPStatus.OK if state.get("ready") else HTTPStatus.SERVICE_UNAVAILABLE
+    missing = state.get("missing_files", [])
     return (
-        status,
+        HTTPStatus.OK,
         {
-            "ok": bool(state.get("ready")),
+            "ok": True,
             "message": (
                 "Arquivos enviados e base atualizada com sucesso."
                 if state.get("ready")
-                else state.get("message", "Arquivos enviados, mas a base não foi carregada.")
+                else (
+                    "Arquivos salvos. Para liberar as consultas, envie também: "
+                    + ", ".join(missing)
+                )
             ),
             "uploaded": uploaded,
             "ready": bool(state.get("ready")),
@@ -606,46 +619,6 @@ def missing_files() -> list[str]:
         for data_file in DATA_FILES
         if data_file.get("required", True) and not data_file["path"].is_file()
     ]
-
-
-def seed_missing_data_files(
-    data_files: list[dict[str, Any]] | None = None,
-    seed_dir: Path | None = None,
-) -> list[str]:
-    selected_files = DATA_FILES if data_files is None else data_files
-    source_dir = SEED_DATA_DIR if seed_dir is None else seed_dir
-    if not source_dir.is_dir():
-        return []
-
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    copied: list[str] = []
-    for data_file in selected_files:
-        target = data_file["path"]
-        source = source_dir / target.name
-        try:
-            target_display = relative_display(target)
-        except ValueError:
-            target_display = str(target)
-        if target.is_file() or not source.is_file():
-            continue
-
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temp_path = target.with_name(
-            f".{target.name}.{secrets.token_hex(8)}.seed.tmp"
-        )
-        try:
-            shutil.copy2(source, temp_path)
-            if target.exists():
-                continue
-            os.replace(temp_path, target)
-            copied.append(target_display)
-        except OSError as error:
-            print(f"Falha ao preparar {target_display}: {error}")
-        finally:
-            if temp_path.exists():
-                temp_path.unlink()
-
-    return copied
 
 
 def database_is_current() -> bool:
@@ -679,10 +652,17 @@ def initialize_auth_database() -> None:
     with open_auth_db() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS equipes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                data_criacao TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome_completo TEXT NOT NULL,
                 email TEXT NOT NULL UNIQUE,
+                email_confirmado_em TEXT,
                 senha_hash TEXT NOT NULL,
                 perfil TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -692,7 +672,9 @@ def initialize_auth_database() -> None:
                 data_bloqueio TEXT,
                 data_cancelamento TEXT,
                 ultimo_login TEXT,
-                FOREIGN KEY (aprovado_por) REFERENCES users(id)
+                equipe_id INTEGER,
+                FOREIGN KEY (aprovado_por) REFERENCES users(id),
+                FOREIGN KEY (equipe_id) REFERENCES equipes(id)
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -730,6 +712,28 @@ def initialize_auth_database() -> None:
                 aceito INTEGER NOT NULL DEFAULT 1
             );
 
+            CREATE TABLE IF NOT EXISTS email_verification_tokens (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                data_criacao TEXT NOT NULL,
+                data_expiracao TEXT NOT NULL,
+                data_utilizacao TEXT,
+                utilizado INTEGER NOT NULL DEFAULT 0,
+                ip_solicitacao TEXT,
+                user_agent TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS email_verification_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email TEXT NOT NULL,
+                ip_solicitacao TEXT,
+                user_agent TEXT,
+                data_criacao TEXT NOT NULL,
+                aceito INTEGER NOT NULL DEFAULT 1
+            );
+
             CREATE TABLE IF NOT EXISTS search_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -758,6 +762,12 @@ def initialize_auth_database() -> None:
             CREATE INDEX IF NOT EXISTS idx_reset_hash ON password_reset_tokens(token_hash);
             CREATE INDEX IF NOT EXISTS idx_reset_requests_email ON password_reset_requests(email, data_criacao);
             CREATE INDEX IF NOT EXISTS idx_reset_requests_ip ON password_reset_requests(ip_solicitacao, data_criacao);
+            CREATE INDEX IF NOT EXISTS idx_email_verification_hash
+                ON email_verification_tokens(token_hash);
+            CREATE INDEX IF NOT EXISTS idx_email_verification_requests_email
+                ON email_verification_requests(email, data_criacao);
+            CREATE INDEX IF NOT EXISTS idx_email_verification_requests_ip
+                ON email_verification_requests(ip_solicitacao, data_criacao);
             CREATE INDEX IF NOT EXISTS idx_search_history_user_date
                 ON search_history(user_id, data_consulta);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_search_history_user_cnpj
@@ -768,6 +778,20 @@ def initialize_auth_database() -> None:
                 ON search_events(data_consulta);
             """
         )
+        user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
+        if "email_confirmado_em" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN email_confirmado_em TEXT")
+            conn.execute(
+                """
+                UPDATE users
+                SET email_confirmado_em = COALESCE(data_aprovacao, data_criacao, ?)
+                """,
+                (utc_iso(),),
+            )
+        if "equipe_id" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN equipe_id INTEGER REFERENCES equipes(id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_equipe ON users(equipe_id)")
+        conn.commit()
         backfill_search_events(conn)
         ensure_initial_admin(conn)
 
@@ -794,22 +818,23 @@ def ensure_initial_admin(conn: sqlite3.Connection) -> None:
     if total_users:
         return
 
-    name = "Thalles Henrique Silva"
-    email = "thallesths97@gmail.com"
-    password = "SSd@22bleach"
+    name = clean_cell(os.environ.get("ADMIN_NAME")) or "Administrador A7 Connect"
+    email = normalize_email(os.environ.get("ADMIN_EMAIL")) or "admin@a7connect.local"
+    configured_password = str(os.environ.get("ADMIN_PASSWORD") or "")
+    password = configured_password or secrets.token_urlsafe(18)
     now = utc_iso()
     conn.execute(
         """
         INSERT INTO users (
-            nome_completo, email, senha_hash, perfil, status, data_criacao,
+            nome_completo, email, email_confirmado_em, senha_hash, perfil, status, data_criacao,
             data_aprovacao, aprovado_por
-        ) VALUES (?, ?, ?, 'ADMIN', 'ATIVO', ?, ?, NULL)
+        ) VALUES (?, ?, ?, ?, 'ADMIN', 'ATIVO', ?, ?, NULL)
         """,
-        (name, email, hash_password(password), now, now),
+        (name, email, now, hash_password(password), now, now),
     )
     conn.commit()
 
-    if not os.environ.get("ADMIN_PASSWORD"):
+    if not configured_password:
         credentials_path = CACHE_DIR / "admin_credentials.txt"
         credentials_path.write_text(
             "\n".join(
@@ -1484,7 +1509,7 @@ def query_detail(value: str, detail_type: str) -> dict[str, Any]:
 
 
 def initialize_data(force_rebuild: bool = False) -> dict[str, Any]:
-    seed_missing_data_files()
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     missing = missing_files()
     if missing:
         names = ", ".join(missing)
@@ -1727,7 +1752,12 @@ def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row | No
     ).fetchone()
 
 
-def create_pending_user(data: dict[str, Any]) -> tuple[bool, str]:
+def create_pending_user(
+    data: dict[str, Any],
+    ip: str,
+    user_agent: str,
+    base_url: str,
+) -> tuple[bool, str]:
     name = clean_cell(data.get("nome_completo"))
     email = normalize_email(data.get("email"))
     password = str(data.get("senha") or "")
@@ -1758,9 +1788,10 @@ def create_pending_user(data: dict[str, Any]) -> tuple[bool, str]:
     except sqlite3.IntegrityError:
         return False, "Este e-mail já está cadastrado."
 
+    request_email_verification(email, ip, user_agent, base_url)
     return (
         True,
-        "Cadastro realizado com sucesso. Aguarde a aprovação do administrador para acessar o sistema.",
+        "Cadastro realizado. Enviamos um link de validação para o seu e-mail.",
     )
 
 
@@ -1808,6 +1839,17 @@ def authenticate_user(
         user = fetch_user_by_email(conn, email)
         if not user or not verify_password(password, user["senha_hash"]):
             return HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "E-mail ou senha inválidos."}, None
+
+        if not user["email_confirmado_em"]:
+            return (
+                HTTPStatus.FORBIDDEN,
+                {
+                    "ok": False,
+                    "code": "EMAIL_NAO_CONFIRMADO",
+                    "message": "Confirme seu e-mail antes de acessar o sistema.",
+                },
+                None,
+            )
 
         status = user["status"]
         if status == "PENDENTE_APROVACAO":
@@ -1858,9 +1900,10 @@ def lookup_session_user(token: str) -> dict[str, Any] | None:
     with open_auth_db() as conn:
         row = conn.execute(
             """
-            SELECT u.*, s.id AS session_id
+            SELECT u.*, COALESCE(e.nome, '') AS equipe_nome, s.id AS session_id
             FROM sessions s
             JOIN users u ON u.id = s.user_id
+            LEFT JOIN equipes e ON e.id = u.equipe_id
             WHERE s.token_hash = ?
               AND s.ativo = 1
               AND s.data_expiracao > ?
@@ -1869,7 +1912,7 @@ def lookup_session_user(token: str) -> dict[str, Any] | None:
         ).fetchone()
         if not row:
             return None
-        if row["status"] != "ATIVO":
+        if row["status"] != "ATIVO" or not row["email_confirmado_em"]:
             conn.execute(
                 "UPDATE sessions SET ativo = 0 WHERE id = ?",
                 (row["session_id"],),
@@ -1887,6 +1930,8 @@ def lookup_session_user(token: str) -> dict[str, Any] | None:
             "email": row["email"],
             "perfil": row["perfil"],
             "status": row["status"],
+            "equipe_id": row["equipe_id"],
+            "equipe_nome": row["equipe_nome"],
         }
 
 
@@ -1902,7 +1947,11 @@ def logout_session(token: str) -> None:
 
 
 def list_users(search: str = "", status: str = "") -> list[dict[str, Any]]:
-    query = "SELECT * FROM users WHERE 1 = 1"
+    query = """
+        SELECT users.*, COALESCE(equipes.nome, '') AS equipe_nome
+        FROM users LEFT JOIN equipes ON equipes.id = users.equipe_id
+        WHERE 1 = 1
+    """
     params: list[Any] = []
     search_value = clean_cell(search)
     status_value = clean_cell(status).upper()
@@ -1919,6 +1968,89 @@ def list_users(search: str = "", status: str = "") -> list[dict[str, Any]]:
     with open_auth_db() as conn:
         rows = conn.execute(query, params).fetchall()
         return [public_user(row) for row in rows]
+
+
+def list_teams() -> list[dict[str, Any]]:
+    with open_auth_db() as conn:
+        rows = conn.execute(
+            """SELECT equipes.id, equipes.nome, COUNT(users.id) AS total_membros
+               FROM equipes LEFT JOIN users ON users.equipe_id = equipes.id
+               GROUP BY equipes.id, equipes.nome ORDER BY equipes.nome COLLATE NOCASE"""
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_team(name: Any) -> tuple[HTTPStatus, dict[str, Any]]:
+    team_name = clean_cell(name)
+    if len(team_name) < 2 or len(team_name) > 80:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Informe um nome de equipe entre 2 e 80 caracteres."}
+    with open_auth_db() as conn:
+        try:
+            cursor = conn.execute("INSERT INTO equipes (nome, data_criacao) VALUES (?, ?)", (team_name, utc_iso()))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            return HTTPStatus.CONFLICT, {"ok": False, "message": "Já existe uma equipe com esse nome."}
+    return HTTPStatus.CREATED, {"ok": True, "message": "Equipe criada com sucesso.", "team": {"id": cursor.lastrowid, "nome": team_name, "total_membros": 0}}
+
+
+def assign_user_team(user_id: int, team_id: int | None) -> tuple[HTTPStatus, dict[str, Any]]:
+    with open_auth_db() as conn:
+        user = fetch_user_by_id(conn, user_id)
+        if not user:
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
+        if user["perfil"] == "SUPERVISOR" and team_id is None:
+            return HTTPStatus.BAD_REQUEST, {
+                "ok": False,
+                "message": "O supervisor precisa permanecer vinculado a uma equipe.",
+            }
+        if team_id is not None and not conn.execute("SELECT id FROM equipes WHERE id = ?", (team_id,)).fetchone():
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Equipe não encontrada."}
+        conn.execute("UPDATE users SET equipe_id = ? WHERE id = ?", (team_id, user_id))
+        conn.commit()
+    return HTTPStatus.OK, {"ok": True, "message": "Equipe do usuário atualizada com sucesso."}
+
+
+def assign_user_profile(
+    admin_user: dict[str, Any],
+    user_id: int,
+    profile: Any,
+) -> tuple[HTTPStatus, dict[str, Any]]:
+    normalized_profile = clean_cell(profile).upper()
+    if normalized_profile not in AUTH_PROFILES:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Perfil inválido."}
+
+    with open_auth_db() as conn:
+        user = fetch_user_by_id(conn, user_id)
+        if not user:
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
+        if user["id"] == admin_user["id"] and normalized_profile != "ADMIN":
+            return HTTPStatus.BAD_REQUEST, {
+                "ok": False,
+                "message": "Não é possível alterar o próprio perfil de administrador.",
+            }
+        if normalized_profile == "SUPERVISOR" and user["equipe_id"] is None:
+            return HTTPStatus.BAD_REQUEST, {
+                "ok": False,
+                "message": "Vincule o usuário a uma equipe antes de torná-lo supervisor.",
+            }
+        if user["perfil"] == "ADMIN" and normalized_profile != "ADMIN":
+            admin_count = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE perfil = 'ADMIN'"
+            ).fetchone()[0]
+            if admin_count <= 1:
+                return HTTPStatus.BAD_REQUEST, {
+                    "ok": False,
+                    "message": "O sistema precisa manter ao menos um administrador.",
+                }
+
+        conn.execute("UPDATE users SET perfil = ? WHERE id = ?", (normalized_profile, user_id))
+        conn.commit()
+
+    labels = {"ADMIN": "Administrador", "SUPERVISOR": "Supervisor", "USUARIO": "Usuário"}
+    return HTTPStatus.OK, {
+        "ok": True,
+        "message": f"Perfil atualizado para {labels[normalized_profile]}.",
+    }
 
 
 def save_search_history(
@@ -2003,7 +2135,7 @@ def list_search_history(user_id: int) -> list[dict[str, Any]]:
     ]
 
 
-def usage_ranking_report() -> dict[str, Any]:
+def usage_ranking_report(team_id: int | None = None, team_name: str = "") -> dict[str, Any]:
     zone = app_zoneinfo()
     now_utc = utc_now()
     now_local = now_utc.astimezone(zone)
@@ -2011,19 +2143,30 @@ def usage_ranking_report() -> dict[str, Any]:
     month_key = (now_local.year, now_local.month)
 
     with open_auth_db() as conn:
-        users = conn.execute(
-            """
-            SELECT id, nome_completo, email, perfil, status, ultimo_login
-            FROM users
-            ORDER BY nome_completo COLLATE NOCASE
-            """
-        ).fetchall()
-        events = conn.execute(
-            """
-            SELECT user_id, data_consulta
+        users_query = """
+            SELECT users.id, users.nome_completo, users.email, users.perfil,
+                   users.status, users.ultimo_login,
+                   users.equipe_id, COALESCE(equipes.nome, 'Sem equipe') AS equipe_nome
+            FROM users LEFT JOIN equipes ON equipes.id = users.equipe_id
+        """
+        users_params: list[Any] = []
+        if team_id is not None:
+            users_query += " WHERE users.equipe_id = ?"
+            users_params.append(team_id)
+        users_query += " ORDER BY nome_completo COLLATE NOCASE"
+        users = conn.execute(users_query, users_params).fetchall()
+
+        events_query = """
+            SELECT search_events.user_id, search_events.cnpj_key,
+                   search_events.cnpj_display, search_events.company_name,
+                   search_events.data_consulta
             FROM search_events
-            """
-        ).fetchall()
+        """
+        events_params: list[Any] = []
+        if team_id is not None:
+            events_query += " JOIN users ON users.id = search_events.user_id WHERE users.equipe_id = ?"
+            events_params.append(team_id)
+        events = conn.execute(events_query, events_params).fetchall()
 
     stats: dict[int, dict[str, Any]] = {}
     for user in users:
@@ -2033,14 +2176,30 @@ def usage_ranking_report() -> dict[str, Any]:
             "email": user["email"],
             "perfil": user["perfil"],
             "status": user["status"],
+            "equipe_id": user["equipe_id"],
+            "equipe_nome": user["equipe_nome"],
             "consultas_diarias": 0,
             "consultas_mensais": 0,
             "consultas_totais": 0,
+            "clientes_unicos_mes": 0,
+            "_clientes_mes": set(),
             "ultima_consulta": "",
             "tempo_desde_ultima_consulta": "Nunca",
             "ultimo_login": user["ultimo_login"] or "",
             "tempo_desde_ultimo_login": elapsed_label(user["ultimo_login"], now_utc),
         }
+
+    daily_counts: dict[str, int] = {}
+    hourly_counts = {hour: 0 for hour in range(24)}
+    monthly_clients: set[str] = set()
+    active_monthly_users: set[int] = set()
+    client_counts: dict[str, dict[str, Any]] = {}
+    team_stats: dict[str, dict[str, Any]] = {}
+    start_date = today - timedelta(days=13)
+
+    for offset in range(14):
+        day = start_date + timedelta(days=offset)
+        daily_counts[day.isoformat()] = 0
 
     for event in events:
         user_stat = stats.get(event["user_id"])
@@ -2057,6 +2216,24 @@ def usage_ranking_report() -> dict[str, Any]:
             user_stat["consultas_diarias"] += 1
         if (event_local.year, event_local.month) == month_key:
             user_stat["consultas_mensais"] += 1
+            user_stat["_clientes_mes"].add(event["cnpj_key"])
+            monthly_clients.add(event["cnpj_key"])
+            active_monthly_users.add(event["user_id"])
+
+        day_key = event_local.date().isoformat()
+        if day_key in daily_counts:
+            daily_counts[day_key] += 1
+        hourly_counts[event_local.hour] += 1
+
+        client_key = event["cnpj_key"]
+        client = client_counts.setdefault(client_key, {
+            "cnpj": event["cnpj_display"] or client_key,
+            "cliente": event["company_name"] or "Cliente não identificado",
+            "consultas": 0,
+            "usuarios": set(),
+        })
+        client["consultas"] += 1
+        client["usuarios"].add(event["user_id"])
 
         current_last = parse_iso_datetime(user_stat["ultima_consulta"])
         if not current_last or event_dt > current_last:
@@ -2064,7 +2241,18 @@ def usage_ranking_report() -> dict[str, Any]:
 
     items = list(stats.values())
     for item in items:
+        item["clientes_unicos_mes"] = len(item.pop("_clientes_mes"))
         item["tempo_desde_ultima_consulta"] = elapsed_label(item["ultima_consulta"], now_utc)
+
+        team = team_stats.setdefault(item["equipe_nome"], {
+            "equipe": item["equipe_nome"], "consultas": 0, "consultas_mes": 0,
+            "usuarios": 0, "usuarios_ativos_mes": 0,
+        })
+        team["consultas"] += item["consultas_totais"]
+        team["consultas_mes"] += item["consultas_mensais"]
+        team["usuarios"] += 1
+        if item["consultas_mensais"]:
+            team["usuarios_ativos_mes"] += 1
 
     items.sort(
         key=lambda item: (
@@ -2079,16 +2267,36 @@ def usage_ranking_report() -> dict[str, Any]:
     for index, item in enumerate(items, start=1):
         item["posicao"] = index
 
+    active_users = sum(1 for item in items if item["status"] == "ATIVO")
+    active_users_month = sum(1 for user_id in active_monthly_users if stats[user_id]["status"] == "ATIVO")
+    adoption = round(active_users_month * 100 / active_users, 1) if active_users else 0
+    top_clients = sorted(client_counts.values(), key=lambda item: item["consultas"], reverse=True)[:8]
+    for client in top_clients:
+        client["usuarios"] = len(client["usuarios"])
+
     return {
         "ok": True,
+        "scope": {
+            "type": "team" if team_id is not None else "global",
+            "team_id": team_id,
+            "team_name": team_name if team_id is not None else "",
+        },
         "timezone": APP_TIMEZONE,
         "generated_at": utc_iso(now_utc),
         "summary": {
             "usuarios": len(items),
+            "usuarios_ativos": active_users,
+            "usuarios_ativos_mes": active_users_month,
+            "adocao_mensal": adoption,
+            "clientes_unicos_mes": len(monthly_clients),
             "consultas_diarias": sum(item["consultas_diarias"] for item in items),
             "consultas_mensais": sum(item["consultas_mensais"] for item in items),
             "consultas_totais": sum(item["consultas_totais"] for item in items),
         },
+        "daily_trend": [{"data": key, "consultas": value} for key, value in daily_counts.items()],
+        "hourly_usage": [{"hora": hour, "consultas": hourly_counts[hour]} for hour in range(24)],
+        "teams": sorted(team_stats.values(), key=lambda item: item["consultas_mes"], reverse=True),
+        "top_clients": top_clients,
         "items": items,
     }
 
@@ -2116,6 +2324,14 @@ def update_user_status(
                 return (
                     HTTPStatus.BAD_REQUEST,
                     {"ok": False, "message": "Somente usuários pendentes podem ser aprovados."},
+                )
+            if not user["email_confirmado_em"]:
+                return (
+                    HTTPStatus.BAD_REQUEST,
+                    {
+                        "ok": False,
+                        "message": "O usuário precisa confirmar o e-mail antes da aprovação.",
+                    },
                 )
             conn.execute(
                 """
@@ -2226,9 +2442,12 @@ def build_reset_email_body(reset_link: str) -> str:
     )
 
 
-def send_password_reset_email(email: str, reset_link: str) -> None:
-    subject = "Redefinição de senha - A7 Connect"
-    body = build_reset_email_body(reset_link)
+def send_transactional_email(
+    email: str,
+    subject: str,
+    body: str,
+    outbox_name: str,
+) -> None:
     smtp_host = os.environ.get("SMTP_HOST")
     smtp_from = os.environ.get("SMTP_FROM") or os.environ.get("SMTP_USER") or "no-reply@a7connect.local"
 
@@ -2251,13 +2470,205 @@ def send_password_reset_email(email: str, reset_link: str) -> None:
             smtp.send_message(message)
         return
 
-    outbox_dir = CACHE_DIR / "password_reset_outbox"
+    outbox_dir = CACHE_DIR / outbox_name
     outbox_dir.mkdir(parents=True, exist_ok=True)
     file_name = f"{int(time.time())}-{secrets.token_hex(4)}.txt"
     (outbox_dir / file_name).write_text(
         "\n".join([f"Para: {email}", f"Assunto: {subject}", "", body]),
         encoding="utf-8",
     )
+
+
+def send_password_reset_email(email: str, reset_link: str) -> None:
+    send_transactional_email(
+        email,
+        "Redefinição de senha - A7 Connect",
+        build_reset_email_body(reset_link),
+        "password_reset_outbox",
+    )
+
+
+def is_email_verification_rate_limited(
+    conn: sqlite3.Connection,
+    email: str,
+    ip: str,
+) -> bool:
+    cutoff = utc_iso(utc_now() - timedelta(seconds=EMAIL_VERIFICATION_WINDOW_SECONDS))
+    email_count = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM email_verification_requests
+        WHERE email = ? AND data_criacao >= ?
+        """,
+        (email, cutoff),
+    ).fetchone()[0]
+    ip_count = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM email_verification_requests
+        WHERE ip_solicitacao = ? AND data_criacao >= ?
+        """,
+        (ip, cutoff),
+    ).fetchone()[0]
+    return (
+        email_count >= EMAIL_VERIFICATION_EMAIL_LIMIT
+        or ip_count >= EMAIL_VERIFICATION_IP_LIMIT
+    )
+
+
+def build_email_verification_body(name: str, verification_link: str) -> str:
+    first_name = clean_cell(name).split(" ", 1)[0] or "Olá"
+    return "\n".join(
+        [
+            f"Olá, {first_name}!",
+            "",
+            "Confirme seu e-mail para validar o cadastro na A7 Connect:",
+            "",
+            verification_link,
+            "",
+            f"Este link é válido por {EMAIL_VERIFICATION_HOURS} horas.",
+            "",
+            "Depois da confirmação, seu cadastro seguirá para aprovação do administrador.",
+            "Se você não criou esta conta, ignore este e-mail.",
+        ]
+    )
+
+
+def send_email_verification_email(
+    email: str,
+    name: str,
+    verification_link: str,
+) -> None:
+    send_transactional_email(
+        email,
+        "Confirme seu e-mail - A7 Connect",
+        build_email_verification_body(name, verification_link),
+        "email_verification_outbox",
+    )
+
+
+def request_email_verification(
+    email: str,
+    ip: str,
+    user_agent: str,
+    base_url: str,
+) -> dict[str, Any]:
+    normalized_email = normalize_email(email)
+    with open_auth_db() as conn:
+        limited = is_email_verification_rate_limited(conn, normalized_email, ip)
+        conn.execute(
+            """
+            INSERT INTO email_verification_requests (
+                email, ip_solicitacao, user_agent, data_criacao, aceito
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (normalized_email, ip, user_agent, utc_iso(), 0 if limited else 1),
+        )
+
+        if not limited:
+            user = fetch_user_by_email(conn, normalized_email)
+            if (
+                user
+                and user["status"] != "CANCELADO"
+                and not user["email_confirmado_em"]
+            ):
+                now = utc_now()
+                conn.execute(
+                    """
+                    UPDATE email_verification_tokens
+                    SET utilizado = 1,
+                        data_utilizacao = COALESCE(data_utilizacao, ?)
+                    WHERE user_id = ? AND utilizado = 0
+                    """,
+                    (utc_iso(now), user["id"]),
+                )
+                raw_token = secrets.token_urlsafe(36)
+                expires_at = now + timedelta(hours=EMAIL_VERIFICATION_HOURS)
+                conn.execute(
+                    """
+                    INSERT INTO email_verification_tokens (
+                        user_id, token_hash, data_criacao, data_expiracao,
+                        utilizado, ip_solicitacao, user_agent
+                    ) VALUES (?, ?, ?, ?, 0, ?, ?)
+                    """,
+                    (
+                        user["id"],
+                        hash_token(raw_token),
+                        utc_iso(now),
+                        utc_iso(expires_at),
+                        ip,
+                        user_agent,
+                    ),
+                )
+                conn.commit()
+                verification_link = f"{base_url}/confirmar-email?token={raw_token}"
+                try:
+                    send_email_verification_email(
+                        normalized_email,
+                        user["nome_completo"],
+                        verification_link,
+                    )
+                except Exception as error:
+                    print(f"Falha ao enviar e-mail de confirmação: {error}")
+                return {"ok": True, "message": GENERIC_VERIFICATION_MESSAGE}
+
+        conn.commit()
+    return {"ok": True, "message": GENERIC_VERIFICATION_MESSAGE}
+
+
+def confirm_email(token: Any) -> tuple[HTTPStatus, dict[str, Any]]:
+    clean_token = clean_cell(token)
+    if not clean_token:
+        return HTTPStatus.BAD_REQUEST, {
+            "ok": False,
+            "message": "Link de confirmação inválido ou expirado.",
+        }
+
+    with open_auth_db() as conn:
+        row = conn.execute(
+            """
+            SELECT evt.*, u.status, u.email_confirmado_em
+            FROM email_verification_tokens evt
+            JOIN users u ON u.id = evt.user_id
+            WHERE evt.token_hash = ?
+            """,
+            (hash_token(clean_token),),
+        ).fetchone()
+        if row and row["email_confirmado_em"]:
+            return HTTPStatus.OK, {
+                "ok": True,
+                "message": "Este e-mail já foi confirmado. Você pode voltar para o login.",
+            }
+        if (
+            not row
+            or row["utilizado"]
+            or row["data_expiracao"] <= utc_iso()
+            or row["status"] == "CANCELADO"
+        ):
+            return HTTPStatus.BAD_REQUEST, {
+                "ok": False,
+                "message": "Link de confirmação inválido ou expirado.",
+            }
+
+        now = utc_iso()
+        conn.execute(
+            "UPDATE users SET email_confirmado_em = ? WHERE id = ?",
+            (now, row["user_id"]),
+        )
+        conn.execute(
+            """
+            UPDATE email_verification_tokens
+            SET utilizado = 1, data_utilizacao = COALESCE(data_utilizacao, ?)
+            WHERE user_id = ? AND utilizado = 0
+            """,
+            (now, row["user_id"]),
+        )
+        conn.commit()
+
+    return HTTPStatus.OK, {
+        "ok": True,
+        "message": "E-mail confirmado com sucesso. Seu cadastro agora aguarda aprovação do administrador.",
+    }
 
 
 def request_password_reset(
@@ -2480,7 +2891,11 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def require_page_user(self, admin: bool = False) -> dict[str, Any] | None:
+    def require_page_user(
+        self,
+        admin: bool = False,
+        reports: bool = False,
+    ) -> dict[str, Any] | None:
         user = self.get_current_user()
         if not user:
             self.redirect("/login")
@@ -2488,9 +2903,16 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         if admin and user["perfil"] != "ADMIN":
             self.send_error(HTTPStatus.FORBIDDEN)
             return None
+        if reports and user["perfil"] not in REPORT_PROFILES:
+            self.send_error(HTTPStatus.FORBIDDEN)
+            return None
         return user
 
-    def require_api_user(self, admin: bool = False) -> dict[str, Any] | None:
+    def require_api_user(
+        self,
+        admin: bool = False,
+        reports: bool = False,
+    ) -> dict[str, Any] | None:
         user = self.get_current_user()
         if not user:
             self.send_json(
@@ -2501,6 +2923,12 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         if admin and user["perfil"] != "ADMIN":
             self.send_json(
                 {"ok": False, "message": "Acesso restrito ao administrador."},
+                status=HTTPStatus.FORBIDDEN,
+            )
+            return None
+        if reports and user["perfil"] not in REPORT_PROFILES:
+            self.send_json(
+                {"ok": False, "message": "Acesso restrito a administradores e supervisores."},
                 status=HTTPStatus.FORBIDDEN,
             )
             return None
@@ -2548,6 +2976,14 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             self.serve_static_file(STATIC_DIR / "aguardando-aprovacao.html", "text/html; charset=utf-8")
             return
 
+        if parsed.path == "/verifique-email":
+            self.serve_static_file(STATIC_DIR / "verifique-email.html", "text/html; charset=utf-8")
+            return
+
+        if parsed.path == "/confirmar-email":
+            self.serve_static_file(STATIC_DIR / "confirmar-email.html", "text/html; charset=utf-8")
+            return
+
         if parsed.path == "/esqueci-senha":
             self.serve_static_file(STATIC_DIR / "esqueci-senha.html", "text/html; charset=utf-8")
             return
@@ -2563,7 +2999,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/admin/relatorios":
-            if not self.require_page_user(admin=True):
+            if not self.require_page_user(reports=True):
                 return
             self.serve_static_file(STATIC_DIR / "admin-reports.html", "text/html; charset=utf-8")
             return
@@ -2591,10 +3027,28 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             )
             return
 
-        if parsed.path == "/api/admin/reports/usage":
+        if parsed.path == "/api/admin/teams":
             if not self.require_api_user(admin=True):
                 return
-            self.send_json(usage_ranking_report())
+            self.send_json({"ok": True, "teams": list_teams()})
+            return
+
+        if parsed.path == "/api/admin/reports/usage":
+            user = self.require_api_user(reports=True)
+            if not user:
+                return
+            if user["perfil"] == "SUPERVISOR" and user["equipe_id"] is None:
+                self.send_json(
+                    {
+                        "ok": False,
+                        "message": "Seu perfil de supervisor ainda não está vinculado a uma equipe.",
+                    },
+                    status=HTTPStatus.FORBIDDEN,
+                )
+                return
+            team_id = user["equipe_id"] if user["perfil"] == "SUPERVISOR" else None
+            team_name = user["equipe_nome"] if user["perfil"] == "SUPERVISOR" else ""
+            self.send_json(usage_ranking_report(team_id=team_id, team_name=team_name))
             return
 
         if parsed.path == "/api/status":
@@ -2721,11 +3175,33 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/auth/register":
             data = self.read_json_body()
-            ok, message = create_pending_user(data)
+            ok, message = create_pending_user(
+                data,
+                self.client_ip(),
+                self.user_agent(),
+                self.base_url(),
+            )
             self.send_json(
                 {"ok": ok, "message": message},
                 status=HTTPStatus.CREATED if ok else HTTPStatus.BAD_REQUEST,
             )
+            return
+
+        if parsed.path == "/api/auth/email/confirm":
+            data = self.read_json_body()
+            status, response = confirm_email(data.get("token"))
+            self.send_json(response, status=status)
+            return
+
+        if parsed.path == "/api/auth/email/resend":
+            data = self.read_json_body()
+            response = request_email_verification(
+                normalize_email(data.get("email")),
+                self.client_ip(),
+                self.user_agent(),
+                self.base_url(),
+            )
+            self.send_json(response)
             return
 
         if parsed.path == "/api/auth/logout":
@@ -2789,6 +3265,46 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 user_id,
                 str(data.get("action") or ""),
             )
+            self.send_json(response, status=status)
+            return
+
+        if parsed.path == "/api/admin/teams":
+            data = self.read_json_body()
+            if not self.require_api_user(admin=True):
+                return
+            status, response = create_team(data.get("nome"))
+            self.send_json(response, status=status)
+            return
+
+        if parsed.path == "/api/admin/users/team":
+            data = self.read_json_body()
+            if not self.require_api_user(admin=True):
+                return
+            try:
+                user_id = int(data.get("user_id"))
+                raw_team_id = data.get("equipe_id")
+                team_id = None if raw_team_id in (None, "") else int(raw_team_id)
+            except (TypeError, ValueError):
+                self.send_json({"ok": False, "message": "Usuário ou equipe inválida."}, status=HTTPStatus.BAD_REQUEST)
+                return
+            status, response = assign_user_team(user_id, team_id)
+            self.send_json(response, status=status)
+            return
+
+        if parsed.path == "/api/admin/users/profile":
+            data = self.read_json_body()
+            admin_user = self.require_api_user(admin=True)
+            if not admin_user:
+                return
+            try:
+                user_id = int(data.get("user_id"))
+            except (TypeError, ValueError):
+                self.send_json(
+                    {"ok": False, "message": "Usuário inválido."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            status, response = assign_user_profile(admin_user, user_id, data.get("perfil"))
             self.send_json(response, status=status)
             return
 
