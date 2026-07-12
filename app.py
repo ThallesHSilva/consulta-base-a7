@@ -13,7 +13,7 @@ import smtplib
 import time
 import textwrap
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from email.message import EmailMessage
@@ -73,6 +73,7 @@ DATA_FILES = [
         "path": DATA_DIR / "PARQUE MOVEL.csv",
         "cnpj_columns": ["CNPJ_CLIENTE"],
         "cliente_columns": ["CLIENTE", "NM_CLIENTE"],
+        "line_columns": ["NR_TELEFONE"],
     },
     {
         "key": "parque_fixa",
@@ -80,6 +81,23 @@ DATA_FILES = [
         "path": DATA_DIR / "PARQUE FIXA.csv",
         "cnpj_columns": ["DOCUMENTO"],
         "cliente_columns": ["NM_CLIENTE", "CLIENTE"],
+    },
+    {
+        "key": "recomendacao_fixa",
+        "label": "RECOMENDACAO FIXA",
+        "path": DATA_DIR / "RECOMENDAÇÃO FIXA.csv",
+        "cnpj_columns": ["DOCUMENTO"],
+        "cliente_columns": [],
+        "required": False,
+    },
+    {
+        "key": "recomendacao_movel",
+        "label": "RECOMENDACAO MOVEL",
+        "path": DATA_DIR / "RECOMENDAÇÃO MÓVEL.csv",
+        "cnpj_columns": ["NR_DOCUMENTO"],
+        "cliente_columns": ["NM_CLIENTE"],
+        "line_columns": ["NR_LINHA"],
+        "required": False,
     },
 ]
 DATA_FILE_BY_KEY = {data_file["key"]: data_file for data_file in DATA_FILES}
@@ -251,6 +269,17 @@ def cnpj_key(value: Any) -> str:
     return digits.lstrip("0") or ("0" if digits else "")
 
 
+def mobile_line_key(value: Any) -> str:
+    raw = clean_cell(value)
+    if not raw:
+        return ""
+    compact = raw.replace(" ", "")
+    if re.fullmatch(r"\d+[,.]0+", compact):
+        compact = re.split(r"[,.]", compact, maxsplit=1)[0]
+    digits = cnpj_digits(compact)
+    return digits[-11:] if len(digits) > 11 else digits
+
+
 def first_value(row: dict[str, str], columns: list[str]) -> str:
     for column in columns:
         value = clean_cell(row.get(column))
@@ -339,6 +368,14 @@ def broadband_unique_key(payload: dict[str, Any], row_number: int | None = None)
     if designator:
         return designator.upper()
     return f"__row_{row_number}" if row_number is not None else ""
+
+
+def recommendation_label(value: Any) -> str:
+    raw = clean_cell(value)
+    if not raw:
+        return ""
+    parts = [clean_cell(part) for part in re.split(r"\s+-\s+", raw) if clean_cell(part)]
+    return parts[1] if len(parts) >= 3 else raw
 
 
 def m_range_key(value: Any) -> str:
@@ -553,14 +590,11 @@ def file_signature() -> list[dict[str, Any]]:
     signature = []
     for data_file in DATA_FILES:
         path = data_file["path"]
-        stat = path.stat()
-        signature.append(
-            {
-                "path": relative_display(path),
-                "size": stat.st_size,
-                "mtime_ns": stat.st_mtime_ns,
-            }
-        )
+        item = {"path": relative_display(path), "exists": path.is_file()}
+        if path.is_file():
+            stat = path.stat()
+            item.update({"size": stat.st_size, "mtime_ns": stat.st_mtime_ns})
+        signature.append(item)
     return signature
 
 
@@ -568,7 +602,7 @@ def missing_files() -> list[str]:
     return [
         relative_display(data_file["path"])
         for data_file in DATA_FILES
-        if not data_file["path"].is_file()
+        if data_file.get("required", True) and not data_file["path"].is_file()
     ]
 
 
@@ -576,7 +610,7 @@ def database_is_current() -> bool:
     if not DB_PATH.is_file():
         return False
     try:
-        with sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS) as conn:
+        with closing(sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS)) as conn:
             row = conn.execute(
                 "SELECT value FROM metadata WHERE key = 'file_signature'"
             ).fetchone()
@@ -768,6 +802,7 @@ def create_schema(conn: sqlite3.Connection) -> None:
             cnpj_key TEXT NOT NULL,
             cnpj_digits TEXT NOT NULL,
             cnpj_original TEXT NOT NULL,
+            line_key TEXT NOT NULL,
             cliente TEXT,
             payload_json TEXT NOT NULL
         );
@@ -806,9 +841,11 @@ def rebuild_database() -> None:
             source_key = data_file["key"]
             source_label = data_file["label"]
             path = data_file["path"]
+            if not path.is_file():
+                continue
             row_count = 0
             indexed_count = 0
-            batch: list[tuple[str, str, int, str, str, str, str, str]] = []
+            batch: list[tuple[str, str, int, str, str, str, str, str, str]] = []
 
             for row_number, record in iter_csv_rows(path):
                 row_count += 1
@@ -819,6 +856,9 @@ def rebuild_database() -> None:
                     continue
 
                 indexed_count += 1
+                normalized_line = mobile_line_key(
+                    first_value(record, data_file.get("line_columns", []))
+                )
                 cliente = first_value(record, data_file["cliente_columns"])
                 payload = {k: v for k, v in record.items() if clean_cell(v)}
                 batch.append(
@@ -829,6 +869,7 @@ def rebuild_database() -> None:
                         key,
                         digits,
                         original_cnpj,
+                        normalized_line,
                         cliente,
                         json.dumps(payload, ensure_ascii=False),
                     )
@@ -839,8 +880,8 @@ def rebuild_database() -> None:
                         """
                         INSERT INTO records (
                             source_key, source_label, row_number, cnpj_key,
-                            cnpj_digits, cnpj_original, cliente, payload_json
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            cnpj_digits, cnpj_original, line_key, cliente, payload_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         batch,
                     )
@@ -851,8 +892,8 @@ def rebuild_database() -> None:
                     """
                     INSERT INTO records (
                         source_key, source_label, row_number, cnpj_key,
-                        cnpj_digits, cnpj_original, cliente, payload_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        cnpj_digits, cnpj_original, line_key, cliente, payload_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     batch,
                 )
@@ -881,6 +922,9 @@ def rebuild_database() -> None:
             "CREATE INDEX idx_records_source_cnpj ON records(source_key, cnpj_key)"
         )
         conn.execute(
+            "CREATE INDEX idx_records_source_line ON records(source_key, line_key)"
+        )
+        conn.execute(
             "INSERT INTO metadata (key, value) VALUES ('file_signature', ?)",
             (json.dumps(file_signature(), ensure_ascii=False, sort_keys=True),),
         )
@@ -892,7 +936,7 @@ def rebuild_database() -> None:
 
 
 def load_sources() -> list[dict[str, Any]]:
-    with sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
@@ -973,18 +1017,51 @@ def load_client_profile(conn: sqlite3.Connection, key: str) -> dict[str, str]:
 
     status = ""
     portfolio = ""
+    posse = ""
+    primeira_oferta = ""
+    digital = ""
+    contact_manager = ""
+    contact_email = ""
+    contact_mobile = ""
     for row in rows:
         payload = json.loads(row["payload_json"])
         if not status:
             status = clean_cell(payload.get("SITUACAO_RECEITA"))
         if not portfolio:
             portfolio = clean_cell(payload.get("ADABASMOVEL"))
-        if status and portfolio:
+        if not posse:
+            posse = clean_cell(payload.get("POSSE"))
+        if not primeira_oferta:
+            primeira_oferta = clean_cell(payload.get("PRIMEIRA_OFERTA"))
+        if not digital:
+            digital = clean_cell(payload.get("DIGITAL_1"))
+        if not contact_manager:
+            contact_manager = clean_cell(payload.get("NM_CONTATO_SFA"))
+        if not contact_email:
+            contact_email = clean_cell(payload.get("EMAIL_CONTATO_PRINCIPAL_SFA"))
+        if not contact_mobile:
+            contact_mobile = clean_cell(payload.get("CELULAR_CONTATO_PRINCIPAL_SFA"))
+        if (
+            status
+            and portfolio
+            and posse
+            and primeira_oferta
+            and digital
+            and contact_manager
+            and contact_email
+            and contact_mobile
+        ):
             break
 
     return {
         "status": status,
         "portfolio": portfolio,
+        "posse": posse,
+        "primeira_oferta": primeira_oferta,
+        "digital": digital,
+        "contact_manager": contact_manager,
+        "contact_email": contact_email,
+        "contact_mobile": contact_mobile,
     }
 
 
@@ -1089,10 +1166,50 @@ def load_mobile_info_empty() -> dict[str, Any]:
     }
 
 
+def load_mobile_recommendations(
+    conn: sqlite3.Connection,
+    line_keys: list[str],
+) -> dict[str, list[dict[str, str]]]:
+    unique_keys = list(dict.fromkeys(key for key in line_keys if key))
+    recommendations: dict[str, list[dict[str, str]]] = {}
+
+    for start in range(0, len(unique_keys), 500):
+        chunk = unique_keys[start : start + 500]
+        placeholders = ", ".join("?" for _ in chunk)
+        rows = conn.execute(
+            f"""
+            SELECT line_key, payload_json
+            FROM records
+            WHERE source_key = 'recomendacao_movel'
+              AND line_key IN ({placeholders})
+            ORDER BY row_number
+            """,
+            chunk,
+        ).fetchall()
+
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            offers = []
+            recommended_plan = clean_cell(payload.get("PLANO_RECOMENDADO"))
+            upgraded_plan = clean_cell(payload.get("PLANO_RECOMENDADO_UP"))
+            if recommended_plan:
+                offers.append(
+                    {"offer": "Plano recomendado", "plan": recommended_plan}
+                )
+            if upgraded_plan:
+                offers.append(
+                    {"offer": "Plano recomendado UP", "plan": upgraded_plan}
+                )
+            if offers:
+                recommendations.setdefault(row["line_key"], offers)
+
+    return recommendations
+
+
 def load_mobile_detail(conn: sqlite3.Connection, key: str) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
-        SELECT row_number, payload_json
+        SELECT row_number, line_key, payload_json
         FROM records
         WHERE source_key = 'parque_movel'
           AND cnpj_key = ?
@@ -1101,9 +1218,16 @@ def load_mobile_detail(conn: sqlite3.Connection, key: str) -> list[dict[str, Any
         (key,),
     ).fetchall()
 
+    recommendations = load_mobile_recommendations(
+        conn,
+        [clean_cell(row["line_key"]) for row in rows],
+    )
     detail = []
     for row in rows:
         payload = json.loads(row["payload_json"])
+        line_key = clean_cell(row["line_key"]) or mobile_line_key(
+            payload.get("NR_TELEFONE")
+        )
         detail.append(
             {
                 "row_number": row["row_number"],
@@ -1113,12 +1237,95 @@ def load_mobile_detail(conn: sqlite3.Connection, key: str) -> list[dict[str, Any
                 "average_billing": decimal_to_json_number(
                     parse_decimal(payload.get("FAT_MEDIO_03_MESES"))
                 ),
+                "offers": recommendations.get(line_key, []),
             }
         )
     return detail
 
 
+def load_fixed_recommendations(
+    conn: sqlite3.Connection,
+    key: str,
+) -> dict[str, list[dict[str, Any]]]:
+    rows = conn.execute(
+        """
+        SELECT row_number, payload_json
+        FROM records
+        WHERE source_key = 'recomendacao_fixa'
+          AND cnpj_key = ?
+        ORDER BY row_number
+        """,
+        (key,),
+    ).fetchall()
+
+    accounts: dict[str, dict[str, dict[str, Any]]] = {}
+    for row in rows:
+        payload = json.loads(row["payload_json"])
+        account_number = clean_cell(payload.get("CONTA_COBRANCA"))
+        recommendation = clean_cell(payload.get("RECOMENDACAO"))
+        if not account_number or not recommendation:
+            continue
+
+        account = accounts.setdefault(account_number, {})
+        offer = account.setdefault(
+            recommendation,
+            {
+                "recommendation": recommendation,
+                "offer_names": [],
+                "plans": [],
+                "recommendation_labels": [],
+                "recommendation_total_decimal": Decimal("0"),
+                "mobile_amount_decimal": Decimal("0"),
+            },
+        )
+
+        offer_name = clean_cell(payload.get("DS_TIPO_PRECO"))
+        if offer_name and offer_name not in offer["offer_names"]:
+            offer["offer_names"].append(offer_name)
+
+        plan = clean_cell(payload.get("PLANO"))
+        if plan and plan not in offer["plans"]:
+            offer["plans"].append(plan)
+
+        label = recommendation_label(payload.get("DS_RECOMENDACAO"))
+        if label and label not in offer["recommendation_labels"]:
+            offer["recommendation_labels"].append(label)
+
+        offer["recommendation_total_decimal"] += parse_decimal(
+            payload.get("VL_RECOMENDACAO")
+        )
+        mobile_amount = parse_decimal(payload.get("VL_CONSUMO_MOVEL"))
+        if mobile_amount > offer["mobile_amount_decimal"]:
+            # The mobile amount repeats on every row of the same recommendation.
+            offer["mobile_amount_decimal"] = mobile_amount
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    for account_number, account_offers in accounts.items():
+        result[account_number] = []
+        for offer in account_offers.values():
+            plans = list(offer["plans"])
+            mobile_amount = offer["mobile_amount_decimal"]
+            if mobile_amount > 0 and "Móvel" not in plans:
+                plans.append("Móvel")
+
+            total = offer["recommendation_total_decimal"] + mobile_amount
+            result[account_number].append(
+                {
+                    "recommendation": offer["recommendation"],
+                    "offer": " + ".join(offer["offer_names"]) or "-",
+                    "plan": " + ".join(plans) or "-",
+                    "recommendation_label": (
+                        " + ".join(offer["recommendation_labels"]) or "-"
+                    ),
+                    "value": decimal_to_json_number(total),
+                }
+            )
+
+    return result
+
+
 def load_broadband_detail(conn: sqlite3.Connection, key: str) -> list[dict[str, Any]]:
+    fixed_recommendations = load_fixed_recommendations(conn, key)
     rows = conn.execute(
         """
         SELECT row_number, payload_json
@@ -1137,15 +1344,23 @@ def load_broadband_detail(conn: sqlite3.Connection, key: str) -> list[dict[str, 
         product = clean_cell(payload.get("DS_PRODUTO")) or "Sem produto"
         designator = clean_cell(payload.get("DESIGNADOR"))
         billing = parse_decimal(payload.get("VL_FAT_BRUTO"))
+        account_m = clean_cell(payload.get("M"))
+        address = clean_cell(payload.get("ENDERECO"))
 
         account = accounts.setdefault(
             account_number,
             {
                 "account": account_number,
+                "m": "",
+                "addresses": [],
                 "total_billing_decimal": Decimal("0"),
                 "products": {},
             },
         )
+        if not account["m"] and account_m:
+            account["m"] = account_m
+        if address and address not in account["addresses"]:
+            account["addresses"].append(address)
 
         product_key = designator or f"__row_{row['row_number']}"
         product_row = account["products"].setdefault(
@@ -1178,8 +1393,11 @@ def load_broadband_detail(conn: sqlite3.Connection, key: str) -> list[dict[str, 
         detail.append(
             {
                 "account": account["account"],
+                "m": account["m"],
+                "address": " / ".join(account["addresses"]),
                 "total_billing": decimal_to_json_number(total_billing),
                 "products": products,
+                "offers": fixed_recommendations.get(account["account"], []),
             }
         )
     return detail
@@ -1197,7 +1415,7 @@ def query_detail(value: str, detail_type: str) -> dict[str, Any]:
             "message": "Informe um CNPJ valido.",
         }
 
-    with sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS)) as conn:
         conn.row_factory = sqlite3.Row
         company_name = load_company_name(conn, key)
         if detail_type == "mobile":
@@ -1262,6 +1480,16 @@ def query_cnpj(value: str) -> dict[str, Any]:
             "company_name": "",
             "client_status": "",
             "client_portfolio": "",
+            "offers": {
+                "posse": "",
+                "primeira_oferta": "",
+                "digital": "",
+            },
+            "contacts": {
+                "manager": "",
+                "email": "",
+                "mobile": "",
+            },
             "device_credit": "",
             "broadband_availability": "",
             "mobile_info": load_mobile_info_empty(),
@@ -1270,7 +1498,7 @@ def query_cnpj(value: str) -> dict[str, Any]:
             "message": "Informe um CNPJ valido.",
         }
 
-    with sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS)) as conn:
         conn.row_factory = sqlite3.Row
         metrics = load_cnpj_metrics(conn, key)
         company_name = load_company_name(conn, key)
@@ -1279,7 +1507,12 @@ def query_cnpj(value: str) -> dict[str, Any]:
         broadband_availability = load_broadband_availability(conn, key)
         mobile_info = load_mobile_info(conn, key)
         total = conn.execute(
-            "SELECT COUNT(*) FROM records WHERE cnpj_key = ?",
+            """
+            SELECT COUNT(*)
+            FROM records
+            WHERE cnpj_key = ?
+              AND source_key NOT IN ('recomendacao_fixa', 'recomendacao_movel')
+            """,
             (key,),
         ).fetchone()[0]
         rows = conn.execute(
@@ -1288,6 +1521,7 @@ def query_cnpj(value: str) -> dict[str, Any]:
                    cnpj_original, cliente, payload_json
             FROM records
             WHERE cnpj_key = ?
+              AND source_key NOT IN ('recomendacao_fixa', 'recomendacao_movel')
             ORDER BY source_label, row_number
             LIMIT ?
             """,
@@ -1312,6 +1546,16 @@ def query_cnpj(value: str) -> dict[str, Any]:
         "company_name": company_name,
         "client_status": client_profile["status"],
         "client_portfolio": client_profile["portfolio"],
+        "offers": {
+            "posse": client_profile["posse"],
+            "primeira_oferta": client_profile["primeira_oferta"],
+            "digital": client_profile["digital"],
+        },
+        "contacts": {
+            "manager": client_profile["contact_manager"],
+            "email": client_profile["contact_email"],
+            "mobile": client_profile["contact_mobile"],
+        },
         "device_credit": device_credit,
         "broadband_availability": broadband_availability,
         "mobile_info": mobile_info,

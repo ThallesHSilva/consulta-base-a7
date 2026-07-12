@@ -262,6 +262,86 @@
           </article>
         </section>
 
+        <section id="contactsPanel" class="contacts-panel dashboard-card" aria-labelledby="contactsTitle" hidden>
+          <div class="contacts-heading">
+            <span class="contacts-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M19 8v6" />
+                <path d="M22 11h-6" />
+              </svg>
+            </span>
+            <span>
+              <span id="contactsTitle" class="contacts-title">Contatos</span>
+              <span class="contacts-subtitle">Responsável principal cadastrado</span>
+            </span>
+          </div>
+          <dl class="contacts-grid">
+            <div class="contact-item">
+              <dt>Gestor</dt>
+              <dd id="contactManagerValue">-</dd>
+            </div>
+            <div class="contact-item">
+              <dt>Email</dt>
+              <dd id="contactEmailValue">-</dd>
+            </div>
+            <div class="contact-item">
+              <dt>Celular</dt>
+              <dd id="contactMobileValue">-</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section id="offersPanel" class="offers-panel dashboard-card" aria-labelledby="offersTitle" hidden>
+          <button
+            id="offersToggle"
+            class="offers-toggle"
+            type="button"
+            aria-expanded="false"
+            aria-controls="offersContent"
+          >
+            <span class="offers-heading">
+              <span class="offers-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-7" />
+                  <path d="M2 7h20v5H2z" />
+                  <path d="M12 7v14" />
+                  <path d="M12 7H7.5a2.5 2.5 0 1 1 2.2-3.7L12 7Z" />
+                  <path d="M12 7h4.5a2.5 2.5 0 1 0-2.2-3.7L12 7Z" />
+                </svg>
+              </span>
+              <span>
+                <span id="offersTitle" class="offers-title">Recomendações</span>
+                <span class="offers-subtitle">Recomendações identificadas para o cliente</span>
+              </span>
+            </span>
+            <span class="offers-toggle-action">
+              <span id="offersToggleLabel">Expandir</span>
+              <svg class="offers-chevron" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </span>
+          </button>
+
+          <div id="offersContent" class="offers-content" hidden>
+            <dl class="offers-grid">
+              <div class="offer-item">
+                <dt>Posse</dt>
+                <dd id="offerPosseValue">-</dd>
+              </div>
+              <div class="offer-item">
+                <dt>Primeira oferta</dt>
+                <dd id="offerFirstValue">-</dd>
+              </div>
+              <div class="offer-item">
+                <dt>Digital</dt>
+                <dd id="offerDigitalValue">-</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
         <section id="metricsPanel" class="kpi-grid" aria-label="Indicadores do CNPJ" hidden>
           <article class="kpi-card dashboard-card">
             <div class="kpi-head">

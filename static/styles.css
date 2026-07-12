@@ -740,6 +740,228 @@ svg rect {
   color: var(--blue);
 }
 
+.offers-panel {
+  overflow: hidden;
+}
+
+.offers-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 5.25rem;
+  gap: 1rem;
+  border: 0;
+  padding: 1rem 1.25rem;
+  background: #fff;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.offers-toggle:hover {
+  background: #fbfaff;
+}
+
+.offers-toggle:focus-visible {
+  outline: 3px solid rgba(108, 60, 240, 0.24);
+  outline-offset: -3px;
+}
+
+.offers-heading,
+.offers-toggle-action {
+  display: flex;
+  align-items: center;
+}
+
+.offers-heading {
+  min-width: 0;
+  gap: 0.9rem;
+}
+
+.offers-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--purple-soft);
+  color: var(--purple);
+}
+
+.offers-icon svg,
+.offers-chevron {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.offers-icon svg {
+  width: 1.45rem;
+  height: 1.45rem;
+}
+
+.offers-title,
+.offers-subtitle {
+  display: block;
+}
+
+.offers-title {
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.offers-subtitle {
+  margin-top: 0.25rem;
+  color: #687086;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.offers-toggle-action {
+  flex: 0 0 auto;
+  gap: 0.45rem;
+  color: var(--purple-dark);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.offers-chevron {
+  width: 1.15rem;
+  height: 1.15rem;
+  transition: transform 250ms ease;
+}
+
+.offers-panel.is-expanded .offers-chevron {
+  transform: rotate(180deg);
+}
+
+.offers-content {
+  border-top: 1px solid var(--line);
+  animation: offers-reveal 250ms ease;
+}
+
+.offers-grid {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr 1fr;
+  margin: 0;
+}
+
+.offer-item {
+  min-width: 0;
+  padding: 1.25rem;
+}
+
+.offer-item + .offer-item {
+  border-left: 1px solid var(--line);
+}
+
+.offer-item dt {
+  color: var(--soft-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.offer-item dd {
+  margin: 0.45rem 0 0;
+  color: #2a3048;
+  font-size: 0.92rem;
+  font-weight: 750;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.contacts-panel {
+  display: grid;
+  grid-template-columns: minmax(14rem, 0.72fr) minmax(0, 2.4fr);
+  overflow: hidden;
+}
+
+.contacts-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.85rem;
+  border-right: 1px solid var(--line);
+  padding: 1rem 1.25rem;
+  background: #fbfbff;
+}
+
+.contacts-icon {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+.contacts-icon svg {
+  width: 1.45rem;
+  height: 1.45rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.contacts-title,
+.contacts-subtitle {
+  display: block;
+}
+
+.contacts-title {
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.contacts-subtitle {
+  margin-top: 0.25rem;
+  color: #687086;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+
+.contacts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+}
+
+.contact-item {
+  min-width: 0;
+  padding: 1.15rem 1.25rem;
+}
+
+.contact-item + .contact-item {
+  border-left: 1px solid var(--line);
+}
+
+.contact-item dt {
+  color: var(--soft-muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.contact-item dd {
+  margin: 0.42rem 0 0;
+  color: #2a3048;
+  font-size: 0.9rem;
+  font-weight: 780;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1109,6 +1331,110 @@ svg rect {
   background: #fafbff;
 }
 
+.mobile-detail-toolbar {
+  display: flex;
+  min-height: 4.25rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.8rem 1rem;
+  background: #fbfbff;
+}
+
+.mobile-detail-toolbar > span {
+  color: #596077;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.mobile-offers-all-toggle,
+.mobile-line-offers-toggle {
+  display: inline-flex;
+  min-height: 2.45rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid rgba(108, 60, 240, 0.28);
+  border-radius: 10px;
+  padding: 0 0.85rem;
+  background: #fff;
+  color: var(--purple-dark);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 800;
+  transition:
+    border-color 250ms ease,
+    box-shadow 250ms ease,
+    transform 250ms ease;
+}
+
+.mobile-offers-all-toggle:hover,
+.mobile-line-offers-toggle:hover {
+  border-color: rgba(108, 60, 240, 0.58);
+  box-shadow: 0 10px 22px rgba(108, 60, 240, 0.12);
+  transform: translateY(-1px);
+}
+
+.mobile-line-offers-toggle svg {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  transition: transform 250ms ease;
+}
+
+.mobile-line-offers-toggle.is-expanded svg {
+  transform: rotate(180deg);
+}
+
+.mobile-offer-row > td {
+  border-bottom: 1px solid rgba(108, 60, 240, 0.18);
+  padding: 0;
+  background: #fbfaff;
+}
+
+.mobile-offer-row:hover > td {
+  background: #fbfaff;
+}
+
+.mobile-line-offers-panel {
+  padding: 1rem;
+  animation: offers-reveal 250ms ease;
+}
+
+.mobile-line-offers-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.mobile-line-offers-heading span {
+  color: var(--purple-dark);
+  font-size: 0.74rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.mobile-line-offers-heading strong {
+  color: #4f566f;
+  font-size: 0.84rem;
+}
+
+.mobile-offer-table {
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.mobile-offer-table th:first-child {
+  width: 14rem;
+}
+
 .account-block {
   overflow: hidden;
   border: 1px solid var(--line);
@@ -1122,7 +1448,7 @@ svg rect {
 
 .account-header {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.8rem;
   padding: 1rem;
   background: linear-gradient(180deg, #fbfbff, #f5f6fb);
@@ -1143,6 +1469,122 @@ svg rect {
   color: var(--ink);
   font-size: 1rem;
   overflow-wrap: anywhere;
+}
+
+.account-address {
+  display: block;
+  max-width: 34rem;
+  margin-top: 0.35rem;
+  color: #687086;
+  font-size: 0.76rem;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.account-header.has-offers {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: center;
+}
+
+.account-offers-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.account-offers-toggle {
+  display: inline-flex;
+  min-height: 2.55rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(108, 60, 240, 0.28);
+  border-radius: 10px;
+  padding: 0 0.9rem;
+  background: #fff;
+  color: var(--purple-dark);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 800;
+  transition:
+    border-color 250ms ease,
+    box-shadow 250ms ease,
+    transform 250ms ease;
+}
+
+.account-offers-toggle:hover {
+  border-color: rgba(108, 60, 240, 0.58);
+  box-shadow: 0 10px 22px rgba(108, 60, 240, 0.12);
+  transform: translateY(-1px);
+}
+
+.account-offers-toggle:focus-visible {
+  outline: 3px solid rgba(108, 60, 240, 0.2);
+  outline-offset: 2px;
+}
+
+.account-offers-toggle svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  transition: transform 250ms ease;
+}
+
+.account-offers-toggle.is-expanded svg {
+  transform: rotate(180deg);
+}
+
+.account-offers-panel {
+  border-top: 1px solid rgba(108, 60, 240, 0.18);
+  padding: 1rem;
+  background: #fbfaff;
+  animation: offers-reveal 250ms ease;
+}
+
+.account-offers-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.account-offers-heading span {
+  color: var(--purple-dark);
+  font-size: 0.74rem;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.account-offers-heading strong {
+  color: #596077;
+  font-size: 0.8rem;
+}
+
+.offer-table {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.offer-table th:nth-child(1) {
+  width: 25%;
+}
+
+.offer-table th:nth-child(3) {
+  width: 12rem;
+}
+
+.offer-table th:nth-child(4),
+.offer-table td:nth-child(4) {
+  width: 10rem;
+  color: var(--green);
+  font-weight: 850;
+  white-space: nowrap;
 }
 
 .auth-body {
@@ -1384,7 +1826,7 @@ svg rect {
 
 .upload-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
 }
 
@@ -1604,6 +2046,17 @@ svg rect {
   }
 }
 
+@keyframes offers-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-0.35rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @page {
   size: A4 landscape;
   margin: 10mm;
@@ -1797,6 +2250,15 @@ svg rect {
     border-top: 1px solid var(--line);
     border-left: 0;
   }
+
+  .contacts-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .contacts-heading {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
 }
 
 @media (max-width: 1180px) {
@@ -1902,6 +2364,24 @@ svg rect {
     padding: 1.2rem;
   }
 
+  .offers-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .contacts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .contact-item + .contact-item {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .offer-item + .offer-item {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
   .fidelity-row {
     grid-template-columns: 1fr;
     gap: 0.55rem;
@@ -1913,6 +2393,24 @@ svg rect {
 
   .detail-table {
     min-width: 42rem;
+  }
+
+  .mobile-detail-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mobile-offers-all-toggle {
+    width: 100%;
+  }
+
+  .account-header.has-offers {
+    grid-template-columns: 1fr;
+  }
+
+  .account-offers-action,
+  .account-offers-toggle {
+    width: 100%;
   }
 
   .auth-body {
@@ -1965,6 +2463,19 @@ svg rect {
 
   .metric-value {
     font-size: 1.75rem;
+  }
+
+  .offers-toggle {
+    align-items: flex-start;
+    padding: 1rem;
+  }
+
+  .offers-subtitle {
+    display: none;
+  }
+
+  .offers-toggle-action > span {
+    display: none;
   }
 
   #detailCnpj {

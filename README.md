@@ -9,6 +9,8 @@ Os arquivos devem existir com estes nomes:
 - `data/MAPA PARQUE.csv`
 - `data/PARQUE MOVEL.csv`
 - `data/PARQUE FIXA.csv`
+- `data/RECOMENDAÇÃO FIXA.csv` (opcional, habilita ofertas no detalhamento de BL)
+- `data/RECOMENDAÇÃO MÓVEL.csv` (opcional, habilita ofertas por linha no detalhamento móvel)
 
 Ao iniciar, a aplicacao verifica esses caminhos e mostra qual arquivo esta ausente quando algum deles nao existe.
 
@@ -31,7 +33,7 @@ A primeira inicializacao pode demorar um pouco porque a aplicacao cria um cache 
 Requisitos:
 
 - Python 3.10 ou superior.
-- Os 3 arquivos CSV dentro de `data/`, com os nomes exatos listados acima.
+- Os 3 arquivos principais dentro de `data/`. As bases de recomendação podem ser enviadas depois pelo painel administrativo.
 - Permissao de escrita na pasta do projeto, pois a aplicacao cria `.cache/consulta_base.sqlite3` e `.cache/auth.sqlite3`.
 
 Variaveis recomendadas em producao:

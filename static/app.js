@@ -7,6 +7,17 @@ const exportPdfButton = document.querySelector("#exportPdfButton");
 const refreshDataButton = document.querySelector("#refreshDataButton");
 const searchMessage = document.querySelector("#searchMessage");
 const companyPanel = document.querySelector("#companyPanel");
+const offersPanel = document.querySelector("#offersPanel");
+const offersToggle = document.querySelector("#offersToggle");
+const offersToggleLabel = document.querySelector("#offersToggleLabel");
+const offersContent = document.querySelector("#offersContent");
+const offerPosseValue = document.querySelector("#offerPosseValue");
+const offerFirstValue = document.querySelector("#offerFirstValue");
+const offerDigitalValue = document.querySelector("#offerDigitalValue");
+const contactsPanel = document.querySelector("#contactsPanel");
+const contactManagerValue = document.querySelector("#contactManagerValue");
+const contactEmailValue = document.querySelector("#contactEmailValue");
+const contactMobileValue = document.querySelector("#contactMobileValue");
 const metricsPanel = document.querySelector("#metricsPanel");
 const mobilePanel = document.querySelector("#mobilePanel");
 const companyNameValue = document.querySelector("#companyNameValue");
@@ -161,8 +172,11 @@ function formatGb(value) {
 
 function setPanelsVisible(visible) {
   companyPanel.hidden = !visible;
+  offersPanel.hidden = !visible;
+  contactsPanel.hidden = !visible;
   metricsPanel.hidden = !visible;
   mobilePanel.hidden = !visible;
+  if (!visible) setOffersExpanded(false);
 }
 
 function showMessage(message, type = "") {
@@ -203,6 +217,25 @@ function renderClientContext(data) {
   clientCnpjValue.textContent = cnpj ? formatCnpj(cnpj) : "-";
   clientStatusValue.textContent = data?.client_status || "-";
   clientSegmentValue.textContent = data?.client_portfolio || "-";
+}
+
+function setOffersExpanded(expanded) {
+  offersToggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  offersContent.hidden = !expanded;
+  offersPanel.classList.toggle("is-expanded", expanded);
+  offersToggleLabel.textContent = expanded ? "Recolher" : "Expandir";
+}
+
+function renderOffers(offers) {
+  offerPosseValue.textContent = offers?.posse || "-";
+  offerFirstValue.textContent = offers?.primeira_oferta || "-";
+  offerDigitalValue.textContent = offers?.digital || "-";
+}
+
+function renderContacts(contacts) {
+  contactManagerValue.textContent = contacts?.manager || "-";
+  contactEmailValue.textContent = contacts?.email || "-";
+  contactMobileValue.textContent = contacts?.mobile || "-";
 }
 
 function renderDeviceCredit(deviceCredit) {
@@ -282,6 +315,8 @@ function renderMobileInfo(info) {
 function resetPanelValues() {
   renderCompanyName();
   renderClientContext();
+  renderOffers();
+  renderContacts();
   renderDeviceCredit();
   renderBroadbandAvailability();
   renderMetrics();
@@ -303,6 +338,8 @@ function renderResults(data) {
   setPanelsVisible(true);
   renderCompanyName(data.company_name);
   renderClientContext(data);
+  renderOffers(data.offers);
+  renderContacts(data.contacts);
   renderDeviceCredit(data.device_credit);
   renderMetrics(data.metrics, data.mobile_info);
   renderBroadbandAvailability(data.metrics, data.broadband_availability);
@@ -443,6 +480,10 @@ searchForm.addEventListener("submit", (event) => {
 
 sidebarToggle?.addEventListener("click", () => {
   document.body.classList.toggle("sidebar-open");
+});
+
+offersToggle?.addEventListener("click", () => {
+  setOffersExpanded(offersToggle.getAttribute("aria-expanded") !== "true");
 });
 
 exportPdfButton?.addEventListener("click", exportPdf);
