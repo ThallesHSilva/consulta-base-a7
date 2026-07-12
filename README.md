@@ -33,8 +33,7 @@ A primeira inicializacao pode demorar um pouco porque a aplicacao cria um cache 
 Requisitos:
 
 - Python 3.10 ou superior.
-- Os 3 arquivos principais dentro de `data/`. As bases de recomendação podem ser enviadas depois pelo painel administrativo.
-- Permissao de escrita na pasta do projeto, pois a aplicacao cria `.cache/consulta_base.sqlite3` e `.cache/auth.sqlite3`.
+- Permissao de escrita em `data/` e `.cache/`. A aplicacao inicia sem CSV e o administrador envia as bases pelo painel.
 
 Variaveis recomendadas em producao:
 
@@ -60,14 +59,19 @@ Observacoes importantes:
 
 - Se usar Nginx como proxy reverso, mantenha `HOST=127.0.0.1` e exponha somente o Nginx para a internet.
 - Se for expor a aplicacao diretamente sem Nginx, use `HOST=0.0.0.0`, mas o recomendado e usar Nginx com HTTPS.
-- Configure `PUBLIC_BASE_URL` para que os links de redefinicao de senha saiam com o dominio correto.
+- Configure `PUBLIC_BASE_URL` para que os links de confirmacao de e-mail e redefinicao de senha saiam com o dominio correto.
 - Use `SESSION_COOKIE_SECURE=1` somente quando o acesso externo estiver em HTTPS.
-- O painel administrativo possui upload semanal dos CSVs em `POST /api/admin/data/upload`; o envio exige usuario `ADMIN`.
-- A imagem Docker inclui uma copia inicial das bases em `/app/seed-data`. Na inicializacao, somente arquivos ausentes sao copiados para `/app/data`; arquivos atualizados pelo administrador nunca sao sobrescritos.
+- O painel administrativo envia os CSVs por `POST /api/admin/data/upload`; o envio exige usuario `ADMIN` e pode ser feito em etapas.
+- Os CSVs de `data/` são ignorados pelo Git e pelo contexto de build do Docker. A imagem não contém bases operacionais.
+- No Docker Compose, o volume nomeado `app-data` preserva os arquivos enviados pelo painel fora do repositório, inclusive após reconstruir o contêiner.
+- Não use `docker compose down -v` em produção: a opção `-v` remove os volumes `app-data` e `app-cache`.
+- MAPA PARQUE, PARQUE MOVEL e PARQUE FIXA são obrigatórias para liberar consultas. As duas bases de recomendação são opcionais e podem ser enviadas depois.
 - `MAX_UPLOAD_BYTES` define o limite do endpoint de upload. O padrao e 300 MB.
 - `APP_TIMEZONE` define o fuso usado nos relatorios diarios e mensais. O padrao e `America/Sao_Paulo`.
-- A pagina `/admin/relatorios` mostra o ranking de uso por usuario e exige perfil `ADMIN`.
+- A pagina `/admin/relatorios` aceita os perfis `ADMIN` e `SUPERVISOR`: o administrador ve todas as equipes, enquanto o supervisor ve somente o relatorio da equipe vinculada ao seu cadastro.
+- Novos cadastros precisam confirmar o e-mail por um link valido por 24 horas antes de poderem ser aprovados pelo administrador. Sem SMTP configurado, as mensagens locais ficam em `.cache/email_verification_outbox/`.
 - Defina `ADMIN_EMAIL`, `ADMIN_NAME` e `ADMIN_PASSWORD` antes da primeira inicializacao. Se `.cache/auth.sqlite3` ja existir, essas variaveis nao recriam o administrador.
+- Sem `ADMIN_PASSWORD`, a primeira inicializacao gera uma senha aleatoria em `.cache/admin_credentials.txt`. No Docker, consulte com `docker compose exec app cat /app/.cache/admin_credentials.txt`.
 - Nao suba a pasta `.cache/` de ambiente local para a VPS se quiser criar credenciais limpas em producao.
 
 Exemplo de systemd:
@@ -115,6 +119,8 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/seu-dominio.com.br/privkey.pem;
 
     client_max_body_size 350m;
+    proxy_read_timeout 1800s;
+    proxy_send_timeout 1800s;
 
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -136,4 +142,4 @@ python -m unittest discover -s tests
 python app.py
 ```
 
-Depois acesse `/login`, crie/aprove usuarios e confira `/api/status` autenticado.
+Depois acesse `/login`, entre como administrador, envie as bases em `/admin/usuarios` e confira `/api/status` autenticado.
