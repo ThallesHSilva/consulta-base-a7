@@ -105,6 +105,7 @@ function statusLabel(status) {
 function profileLabel(profile) {
   return {
     ADMIN: "Administrador",
+    GESTOR: "Gestor",
     SUPERVISOR: "Supervisor",
     USUARIO: "Usuário",
   }[profile] || profile || "-";
@@ -141,7 +142,7 @@ function renderUsers(users) {
   if (!users.length) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 7;
+    cell.colSpan = 8;
     cell.className = "admin-empty-cell";
     cell.textContent = "Nenhum usuário encontrado.";
     row.appendChild(cell);
@@ -166,7 +167,7 @@ function renderUsers(users) {
     const profileSelect = document.createElement("select");
     profileSelect.className = "team-select";
     profileSelect.setAttribute("aria-label", `Perfil de ${user.nome_completo}`);
-    ["ADMIN", "SUPERVISOR", "USUARIO"].forEach((profile) => {
+    ["ADMIN", "GESTOR", "SUPERVISOR", "USUARIO"].forEach((profile) => {
       profileSelect.add(new Option(profileLabel(profile), profile));
     });
     profileSelect.value = user.perfil;
@@ -181,6 +182,25 @@ function renderUsers(users) {
     teamSelect.value = user.equipe_id == null ? "" : String(user.equipe_id);
     teamSelect.addEventListener("change", () => assignTeam(user.id, teamSelect.value, teamSelect));
     teamCell.appendChild(teamSelect);
+
+    const managerCell = document.createElement("td");
+    const managerSelect = document.createElement("select");
+    managerSelect.className = "team-select";
+    managerSelect.setAttribute("aria-label", `Gestor de ${user.nome_completo}`);
+    if (user.perfil === "SUPERVISOR") {
+      managerSelect.add(new Option("Sem gestor", ""));
+      adminManagers.forEach((manager) => {
+        managerSelect.add(new Option(manager.nome_completo, String(manager.id)));
+      });
+      managerSelect.value = user.gestor_id == null ? "" : String(user.gestor_id);
+      managerSelect.addEventListener("change", () => {
+        assignManager(user.id, managerSelect.value, managerSelect);
+      });
+    } else {
+      managerSelect.add(new Option("Não se aplica", ""));
+      managerSelect.disabled = true;
+    }
+    managerCell.appendChild(managerSelect);
 
     const statusCell = document.createElement("td");
     const badge = document.createElement("span");
@@ -208,12 +228,13 @@ function renderUsers(users) {
       actionCell.textContent = "-";
     }
 
-    row.append(userCell, profileCell, teamCell, statusCell, createdCell, loginCell, actionCell);
+    row.append(userCell, profileCell, teamCell, managerCell, statusCell, createdCell, loginCell, actionCell);
     adminUsersBody.appendChild(row);
   });
 }
 
 let adminTeams = [];
+let adminManagers = [];
 
 function renderTeams() {
   if (adminTeamsCount) adminTeamsCount.textContent = `${adminTeams.length} equipe(s)`;
@@ -249,6 +270,17 @@ async function assignProfile(userId, profile, select) {
   const { response, data } = await postJson("/api/admin/users/profile", {
     user_id: userId,
     perfil: profile,
+  });
+  showAuthMessage(data.message, response.ok ? "success" : "error", adminMessage);
+  select.disabled = false;
+  await loadAdminUsers();
+}
+
+async function assignManager(userId, managerId, select) {
+  select.disabled = true;
+  const { response, data } = await postJson("/api/admin/users/manager", {
+    user_id: userId,
+    gestor_id: managerId,
   });
   showAuthMessage(data.message, response.ok ? "success" : "error", adminMessage);
   select.disabled = false;
@@ -299,6 +331,31 @@ function renderDataUploadSummary(data) {
   dataUploadSummary.hidden = false;
 }
 
+function uploadErrorMessage(status, fallback = "") {
+  if (status === 413) {
+    return "O proxy recusou o arquivo por tamanho (HTTP 413). Configure client_max_body_size para pelo menos 100m.";
+  }
+  if (status === 502) {
+    return "O proxy perdeu a conexão com a aplicação durante o upload (HTTP 502). Verifique os logs e a memória do contêiner.";
+  }
+  if (status === 504) {
+    return "O processamento excedeu o tempo do proxy (HTTP 504). Aumente proxy_read_timeout e verifique os logs.";
+  }
+  return fallback || `O servidor recusou a operação (HTTP ${status}).`;
+}
+
+async function readUploadResponse(response) {
+  const text = await response.text();
+  if (text) {
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      // Respostas HTML do proxy são convertidas em uma mensagem útil abaixo.
+    }
+  }
+  return { ok: false, message: uploadErrorMessage(response.status) };
+}
+
 async function loadAdminUsers() {
   if (!adminUsersBody) return;
   hideAuthMessage(adminMessage);
@@ -312,6 +369,7 @@ async function loadAdminUsers() {
     showAuthMessage(data.message || "Não foi possível carregar usuários.", "error", adminMessage);
     return;
   }
+  adminManagers = data.managers || [];
   renderUsers(data.users || []);
 }
 
@@ -332,38 +390,76 @@ dataUploadForm?.addEventListener("submit", async (event) => {
   hideAuthMessage(dataUploadMessage);
   if (dataUploadSummary) dataUploadSummary.hidden = true;
 
-  const hasFile = [...dataUploadForm.querySelectorAll("input[type='file']")].some(
-    (input) => input.files.length > 0,
-  );
-  if (!hasFile) {
+  const selectedInputs = [...dataUploadForm.querySelectorAll("input[type='file']")]
+    .filter((input) => input.files.length > 0);
+  if (!selectedInputs.length) {
     showAuthMessage("Selecione ao menos um arquivo CSV para atualizar.", "error", dataUploadMessage);
     return;
   }
 
   setDataUploadLoading(true);
-  showAuthMessage("Enviando arquivos e reconstruindo a base...", "success", dataUploadMessage);
+  const uploaded = [];
   try {
-    const response = await fetch("/api/admin/data/upload", {
+    for (let index = 0; index < selectedInputs.length; index += 1) {
+      const input = selectedInputs[index];
+      const file = input.files[0];
+      showAuthMessage(
+        `Enviando ${index + 1} de ${selectedInputs.length}: ${file.name} (${formatBytes(file.size)})...`,
+        "success",
+        dataUploadMessage,
+      );
+
+      const formData = new FormData();
+      formData.append(input.name, file, file.name);
+      const response = await fetch("/api/admin/data/upload?refresh=0", {
+        method: "POST",
+        body: formData,
+      });
+      if (response.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
+      const data = await readUploadResponse(response);
+      if (!response.ok || !data.ok) {
+        throw new Error(data.message || uploadErrorMessage(response.status));
+      }
+      uploaded.push(...(data.uploaded || []));
+    }
+
+    showAuthMessage("Arquivos recebidos. Reconstruindo a base...", "success", dataUploadMessage);
+    const refreshResponse = await fetch("/api/data/refresh", {
       method: "POST",
-      body: new FormData(dataUploadForm),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: true }),
     });
-    if (response.status === 401) {
+    if (refreshResponse.status === 401) {
       window.location.href = "/login";
       return;
     }
-    const data = await response.json();
-    const ok = response.ok && data.ok;
+    const data = await readUploadResponse(refreshResponse);
+    if (!refreshResponse.ok && refreshResponse.status !== 503) {
+      throw new Error(data.message || uploadErrorMessage(refreshResponse.status));
+    }
+
+    const ready = refreshResponse.ok && data.ok;
     showAuthMessage(
-      data.message || (ok ? "Base atualizada com sucesso." : "Não foi possível atualizar a base."),
-      ok ? "success" : "error",
+      ready
+        ? (data.message || "Base atualizada com sucesso.")
+        : `Arquivos salvos. ${data.message || "Ainda faltam bases obrigatórias."}`,
+      ready ? "success" : "warning",
       dataUploadMessage,
     );
-    if (ok) {
-      dataUploadForm.reset();
-      renderDataUploadSummary(data);
-    }
+    dataUploadForm.reset();
+    renderDataUploadSummary({ ...data, uploaded });
   } catch (error) {
-    showAuthMessage("Não foi possível enviar os arquivos. Tente novamente.", "error", dataUploadMessage);
+    const savedMessage = uploaded.length
+      ? `${uploaded.length} arquivo(s) já foram salvos. `
+      : "";
+    showAuthMessage(
+      `${savedMessage}${error.message || "Não foi possível enviar os arquivos."}`,
+      "error",
+      dataUploadMessage,
+    );
   } finally {
     setDataUploadLoading(false);
   }

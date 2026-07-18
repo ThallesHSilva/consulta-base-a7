@@ -103,6 +103,28 @@
           </div>
         </header>
 
+        <section class="dashboard-card report-filter-panel" aria-label="Filtros do relatório">
+          <div class="report-filter-heading">
+            <span class="eyebrow">Visualização aprofundada</span>
+            <h2>Filtros do relatório</h2>
+          </div>
+          <label>
+            <span>Equipe</span>
+            <select id="reportsTeamFilter">
+              <option value="">Todas as equipes</option>
+            </select>
+          </label>
+          <label>
+            <span>Usuário</span>
+            <select id="reportsUserFilter">
+              <option value="">Todos os usuários</option>
+            </select>
+          </label>
+          <button id="reportsClearFiltersButton" class="ghost-button" type="button">
+            Limpar filtros
+          </button>
+        </section>
+
         <section class="reports-summary-grid" aria-label="Resumo de uso">
           <article class="dashboard-card report-summary-card">
             <span>Consultas hoje</span>

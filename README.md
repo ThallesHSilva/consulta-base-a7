@@ -61,6 +61,7 @@ Observacoes importantes:
 - Se for expor a aplicacao diretamente sem Nginx, use `HOST=0.0.0.0`, mas o recomendado e usar Nginx com HTTPS.
 - Configure `PUBLIC_BASE_URL` para que os links de confirmacao de e-mail e redefinicao de senha saiam com o dominio correto.
 - Use `SESSION_COOKIE_SECURE=1` somente quando o acesso externo estiver em HTTPS.
+- A sessão de login dura no máximo 2 horas. Um novo login da mesma conta invalida automaticamente a sessão anterior, inclusive em outro dispositivo.
 - O painel administrativo envia os CSVs por `POST /api/admin/data/upload`; o envio exige usuario `ADMIN` e pode ser feito em etapas.
 - Os CSVs de `data/` são ignorados pelo Git e pelo contexto de build do Docker. A imagem não contém bases operacionais.
 - No Docker Compose, o volume nomeado `app-data` preserva os arquivos enviados pelo painel fora do repositório, inclusive após reconstruir o contêiner.
@@ -68,7 +69,7 @@ Observacoes importantes:
 - MAPA PARQUE, PARQUE MOVEL e PARQUE FIXA são obrigatórias para liberar consultas. As duas bases de recomendação são opcionais e podem ser enviadas depois.
 - `MAX_UPLOAD_BYTES` define o limite do endpoint de upload. O padrao e 300 MB.
 - `APP_TIMEZONE` define o fuso usado nos relatorios diarios e mensais. O padrao e `America/Sao_Paulo`.
-- A pagina `/admin/relatorios` aceita os perfis `ADMIN` e `SUPERVISOR`: o administrador ve todas as equipes, enquanto o supervisor ve somente o relatorio da equipe vinculada ao seu cadastro.
+- A pagina `/admin/relatorios` aceita os perfis `ADMIN`, `GESTOR` e `SUPERVISOR`: o administrador ve todas as equipes, o gestor ve os supervisores vinculados a ele e as respectivas equipes, enquanto o supervisor ve somente a propria equipe.
 - Novos cadastros precisam confirmar o e-mail por um link valido por 24 horas antes de poderem ser aprovados pelo administrador. Sem SMTP configurado, as mensagens locais ficam em `.cache/email_verification_outbox/`.
 - Defina `ADMIN_EMAIL`, `ADMIN_NAME` e `ADMIN_PASSWORD` antes da primeira inicializacao. Se `.cache/auth.sqlite3` ja existir, essas variaveis nao recriam o administrador.
 - Sem `ADMIN_PASSWORD`, a primeira inicializacao gera uma senha aleatoria em `.cache/admin_credentials.txt`. No Docker, consulte com `docker compose exec app cat /app/.cache/admin_credentials.txt`.

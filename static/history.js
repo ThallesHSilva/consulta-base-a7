@@ -10,7 +10,8 @@ function onlyDigits(value) {
 
 function formatCnpj(value) {
   const raw = String(value || "").trim();
-  const digits = onlyDigits(raw);
+  const rawDigits = onlyDigits(raw);
+  const digits = rawDigits.length <= 14 ? rawDigits.padStart(14, "0") : rawDigits;
   if (digits.length !== 14) return raw || "-";
   return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
 }

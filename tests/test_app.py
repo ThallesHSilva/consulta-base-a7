@@ -23,6 +23,12 @@ class CnpjNormalizationTest(unittest.TestCase):
     def test_blank_values_do_not_produce_key(self):
         self.assertEqual(app.cnpj_key(""), "")
 
+    def test_display_adds_leading_zeroes_to_complete_fourteen_digits(self):
+        self.assertEqual(
+            app.format_cnpj_display("21.147.000/320"),
+            "00.021.147/0003-20",
+        )
+
 
 class HeaderSanitizingTest(unittest.TestCase):
     def test_blank_and_duplicate_headers_are_unique(self):
@@ -190,6 +196,7 @@ class FixedRecommendationTest(unittest.TestCase):
 
         self.assertEqual(result["total"], 0)
         self.assertEqual(result["results"], [])
+        self.assertEqual(result["cnpj"], "00.000.000/0001-23")
 
 
 class MobileInfoParsingTest(unittest.TestCase):
@@ -307,6 +314,11 @@ class ClientProfileTest(unittest.TestCase):
                     json.dumps(
                         {
                             "DIGITAL_1": "Microsoft 365",
+                            "FIXA_BASICA": "Oferta Fixa Básica",
+                            "VIVO_TECH": "Vivo Tech disponível",
+                            "AVANCADOS": "Solução avançada",
+                            "MOVEL": "Oferta móvel",
+                            "VVN": "Oferta VVN",
                             "NM_CONTATO_SFA": "Maria Gestora",
                             "EMAIL_CONTATO_PRINCIPAL_SFA": "maria@example.com",
                             "CELULAR_CONTATO_PRINCIPAL_SFA": "11999990000",
@@ -320,6 +332,11 @@ class ClientProfileTest(unittest.TestCase):
         self.assertEqual(profile["posse"], "Movel")
         self.assertEqual(profile["primeira_oferta"], "Oferta A")
         self.assertEqual(profile["digital"], "Microsoft 365")
+        self.assertEqual(profile["fixa_basica"], "Oferta Fixa Básica")
+        self.assertEqual(profile["vivo_tech"], "Vivo Tech disponível")
+        self.assertEqual(profile["avancada"], "Solução avançada")
+        self.assertEqual(profile["movel"], "Oferta móvel")
+        self.assertEqual(profile["vvn"], "Oferta VVN")
         self.assertEqual(profile["contact_manager"], "Maria Gestora")
         self.assertEqual(profile["contact_email"], "maria@example.com")
         self.assertEqual(profile["contact_mobile"], "11999990000")
@@ -478,6 +495,25 @@ class PdfExportTest(unittest.TestCase):
         self.assertTrue(pdf.startswith(b"%PDF-1.4"))
         self.assertIn(b"%%EOF", pdf)
 
+    def test_cnpj_pdf_uses_fourteen_digit_display(self):
+        original_query_cnpj = app.query_cnpj
+        app.query_cnpj = lambda value: {
+            "total": 1,
+            "cnpj": app.format_cnpj_display(value),
+            "normalized": app.cnpj_key(value),
+            "company_name": "Cliente Teste",
+            "metrics": {},
+            "mobile_info": {},
+        }
+        try:
+            status, pdf, filename = app.build_cnpj_pdf("21.147.000/320")
+        finally:
+            app.query_cnpj = original_query_cnpj
+
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertIn(b"CNPJ: 00.021.147/0003-20", pdf)
+        self.assertEqual(filename, "consulta-cnpj-00021147000320.pdf")
+
 
 class DataUploadTest(unittest.TestCase):
     def test_empty_install_starts_without_bundled_bases(self):
@@ -514,7 +550,7 @@ class DataUploadTest(unittest.TestCase):
         self.assertEqual(state["missing_files"], ["data/BASE A.csv"])
         self.assertTrue(data_dir_created)
 
-    def test_partial_admin_upload_is_saved_while_other_required_base_is_missing(self):
+    def test_deferred_admin_upload_is_saved_while_other_required_base_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             original_root = app.ROOT
@@ -549,7 +585,8 @@ class DataUploadTest(unittest.TestCase):
                             "filename": "BASE A.csv",
                             "content": b"DOCUMENTO;CLIENTE\n12;Cliente\n",
                         }
-                    ]
+                    ],
+                    refresh_after_upload=False,
                 )
                 file_saved = (app.DATA_DIR / "BASE A.csv").is_file()
             finally:
@@ -626,14 +663,21 @@ class SearchHistoryTest(unittest.TestCase):
             os.environ["ADMIN_PASSWORD"] = self.original_admin_password
         self.temp_dir.cleanup()
 
-    def create_active_user(self, name, email, team_id=None, profile="USUARIO"):
+    def create_active_user(
+        self,
+        name,
+        email,
+        team_id=None,
+        profile="USUARIO",
+        manager_id=None,
+    ):
         with app.open_auth_db() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO users (
                     nome_completo, email, email_confirmado_em, senha_hash, perfil, status,
-                    data_criacao, data_aprovacao, equipe_id
-                ) VALUES (?, ?, ?, ?, ?, 'ATIVO', ?, ?, ?)
+                    data_criacao, data_aprovacao, equipe_id, gestor_id
+                ) VALUES (?, ?, ?, ?, ?, 'ATIVO', ?, ?, ?, ?)
                 """,
                 (
                     name,
@@ -644,6 +688,7 @@ class SearchHistoryTest(unittest.TestCase):
                     app.utc_iso(),
                     app.utc_iso(),
                     team_id,
+                    manager_id,
                 ),
             )
             conn.commit()
@@ -662,6 +707,48 @@ class SearchHistoryTest(unittest.TestCase):
         self.assertEqual(len(items), 15)
         self.assertEqual(items[0]["cnpj"], "12.345.678/0001-15")
         self.assertNotIn("12.345.678/0001-00", [item["cnpj"] for item in items])
+
+    def test_session_lasts_two_hours_and_new_login_invalidates_previous(self):
+        with app.open_auth_db() as conn:
+            first_token = app.create_session(conn, 1, "127.0.0.1", "device-one")
+            first_session = conn.execute(
+                "SELECT data_criacao, data_expiracao FROM sessions WHERE token_hash = ?",
+                (app.hash_token(first_token),),
+            ).fetchone()
+
+        created_at = app.parse_iso_datetime(first_session["data_criacao"])
+        expires_at = app.parse_iso_datetime(first_session["data_expiracao"])
+        self.assertEqual(expires_at - created_at, app.timedelta(hours=2))
+        self.assertIsNotNone(app.lookup_session_user(first_token))
+
+        with app.open_auth_db() as conn:
+            second_token = app.create_session(conn, 1, "10.0.0.2", "device-two")
+            active_sessions = conn.execute(
+                "SELECT COUNT(*) FROM sessions WHERE user_id = 1 AND ativo = 1"
+            ).fetchone()[0]
+
+        self.assertEqual(active_sessions, 1)
+        self.assertIsNone(app.lookup_session_user(first_token))
+        self.assertIsNotNone(app.lookup_session_user(second_token))
+
+    def test_session_created_more_than_two_hours_ago_is_rejected(self):
+        with app.open_auth_db() as conn:
+            token = app.create_session(conn, 1, "127.0.0.1", "old-device")
+            conn.execute(
+                """
+                UPDATE sessions
+                SET data_criacao = ?, data_expiracao = ?
+                WHERE token_hash = ?
+                """,
+                (
+                    app.utc_iso(app.utc_now() - app.timedelta(hours=3)),
+                    app.utc_iso(app.utc_now() + app.timedelta(hours=9)),
+                    app.hash_token(token),
+                ),
+            )
+            conn.commit()
+
+        self.assertIsNone(app.lookup_session_user(token))
 
     def test_history_updates_repeated_cnpj_without_duplicate(self):
         app.save_search_history(
@@ -765,6 +852,174 @@ class SearchHistoryTest(unittest.TestCase):
         self.assertEqual(report["summary"]["consultas_totais"], 2)
         self.assertEqual([team["equipe"] for team in report["teams"]], ["Equipe A"])
         self.assertNotIn("Cliente externo", [client["cliente"] for client in report["top_clients"]])
+
+    def test_supervisor_can_be_assigned_to_manager(self):
+        manager_id = self.create_active_user(
+            "Gestora Regional", "gestora@example.com", profile="GESTOR"
+        )
+        _, created = app.create_team("Equipe Norte")
+        supervisor_id = self.create_active_user(
+            "Supervisor Norte",
+            "supervisor-norte@example.com",
+            created["team"]["id"],
+            "SUPERVISOR",
+        )
+
+        status, response = app.assign_user_manager(supervisor_id, manager_id)
+
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+        supervisor = next(item for item in app.list_users() if item["id"] == supervisor_id)
+        self.assertEqual(supervisor["gestor_id"], manager_id)
+        self.assertEqual(supervisor["gestor_nome"], "Gestora Regional")
+
+    def test_only_supervisor_can_be_assigned_to_manager(self):
+        manager_id = self.create_active_user(
+            "Gestor", "gestor-validacao@example.com", profile="GESTOR"
+        )
+        user_id = self.create_active_user("Pessoa", "pessoa-validacao@example.com")
+
+        status, response = app.assign_user_manager(user_id, manager_id)
+
+        self.assertEqual(status, app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("supervisores", response["message"].lower())
+
+    def test_manager_profile_cannot_change_with_assigned_supervisors(self):
+        manager_id = self.create_active_user(
+            "Gestora", "gestora-bloqueio@example.com", profile="GESTOR"
+        )
+        _, created = app.create_team("Equipe Bloqueio")
+        self.create_active_user(
+            "Supervisora",
+            "supervisora-bloqueio@example.com",
+            created["team"]["id"],
+            "SUPERVISOR",
+            manager_id,
+        )
+
+        status, response = app.assign_user_profile({"id": 1}, manager_id, "USUARIO")
+
+        self.assertEqual(status, app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("reatribua", response["message"].lower())
+
+        status, response = app.update_user_status({"id": 1}, manager_id, "cancelar")
+        self.assertEqual(status, app.HTTPStatus.BAD_REQUEST)
+        self.assertIn("reatribua", response["message"].lower())
+
+    def test_manager_report_contains_only_assigned_supervisors_teams(self):
+        manager_id = self.create_active_user(
+            "Gestor Sudeste", "gestor-sudeste@example.com", profile="GESTOR"
+        )
+        other_manager_id = self.create_active_user(
+            "Gestor Sul", "gestor-sul@example.com", profile="GESTOR"
+        )
+        _, team_a = app.create_team("Equipe A Gestor")
+        _, team_b = app.create_team("Equipe B Gestor")
+        team_a_id = team_a["team"]["id"]
+        team_b_id = team_b["team"]["id"]
+        supervisor_id = self.create_active_user(
+            "Supervisor A",
+            "supervisor-gestor-a@example.com",
+            team_a_id,
+            "SUPERVISOR",
+            manager_id,
+        )
+        member_id = self.create_active_user(
+            "Pessoa A", "pessoa-gestor-a@example.com", team_a_id
+        )
+        external_id = self.create_active_user(
+            "Pessoa B", "pessoa-gestor-b@example.com", team_b_id
+        )
+        self.create_active_user(
+            "Supervisor B",
+            "supervisor-gestor-b@example.com",
+            team_b_id,
+            "SUPERVISOR",
+            other_manager_id,
+        )
+        for user_id, cnpj, client in (
+            (supervisor_id, "11.111.111/0001-11", "Cliente Supervisor"),
+            (member_id, "22.222.222/0001-22", "Cliente Equipe"),
+            (external_id, "33.333.333/0001-33", "Cliente Externo"),
+        ):
+            app.save_search_history(
+                user_id,
+                cnpj,
+                {"query": cnpj, "total": 1, "company_name": client},
+            )
+
+        scope = app.manager_report_scope(manager_id)
+        report = app.usage_ranking_report(
+            team_ids=scope["team_ids"],
+            manager_name="Gestor Sudeste",
+            supervisors=scope["supervisors"],
+        )
+
+        self.assertEqual(report["scope"]["type"], "manager")
+        self.assertEqual(report["scope"]["manager_name"], "Gestor Sudeste")
+        self.assertEqual(len(report["scope"]["supervisors"]), 1)
+        self.assertEqual(
+            {item["nome_completo"] for item in report["items"]},
+            {"Supervisor A", "Pessoa A"},
+        )
+        self.assertEqual(report["summary"]["consultas_totais"], 2)
+        self.assertNotIn(
+            "Cliente Externo",
+            [client["cliente"] for client in report["top_clients"]],
+        )
+
+        user_report = app.usage_ranking_report(
+            team_ids=scope["team_ids"],
+            manager_name="Gestor Sudeste",
+            supervisors=scope["supervisors"],
+            filter_user_id=member_id,
+        )
+        self.assertEqual(
+            [item["nome_completo"] for item in user_report["items"]],
+            ["Pessoa A"],
+        )
+        self.assertEqual(user_report["summary"]["consultas_totais"], 1)
+        self.assertEqual(user_report["filters"]["selected_user_name"], "Pessoa A")
+        self.assertEqual(len(user_report["filters"]["users"]), 2)
+
+        outside_team_report = app.usage_ranking_report(
+            team_ids=scope["team_ids"],
+            filter_team_id=team_b_id,
+        )
+        self.assertEqual(outside_team_report["items"], [])
+        self.assertEqual(outside_team_report["filters"]["selected_team_name"], "")
+
+    def test_usage_report_can_filter_by_team(self):
+        _, team_a = app.create_team("Equipe Filtro A")
+        _, team_b = app.create_team("Equipe Filtro B")
+        member_a_id = self.create_active_user(
+            "Pessoa Filtro A", "filtro-a@example.com", team_a["team"]["id"]
+        )
+        member_b_id = self.create_active_user(
+            "Pessoa Filtro B", "filtro-b@example.com", team_b["team"]["id"]
+        )
+        for user_id, cnpj in (
+            (member_a_id, "44.444.444/0001-44"),
+            (member_b_id, "55.555.555/0001-55"),
+        ):
+            app.save_search_history(
+                user_id,
+                cnpj,
+                {"query": cnpj, "total": 1, "company_name": "Cliente Filtro"},
+            )
+
+        report = app.usage_ranking_report(filter_team_id=team_a["team"]["id"])
+
+        self.assertEqual(
+            [item["nome_completo"] for item in report["items"]],
+            ["Pessoa Filtro A"],
+        )
+        self.assertEqual(report["summary"]["consultas_totais"], 1)
+        self.assertEqual(report["filters"]["selected_team_name"], "Equipe Filtro A")
+        self.assertEqual(
+            {team["nome"] for team in report["filters"]["teams"]},
+            {"Equipe Filtro A", "Equipe Filtro B"},
+        )
 
     def test_usage_report_counts_repeated_consultations(self):
         app.save_search_history(

@@ -10,6 +10,14 @@ const detailType = params.get("type") || "";
 const cnpj = params.get("cnpj") || "";
 backLink.href = cnpj ? `/app?cnpj=${encodeURIComponent(cnpj)}` : "/app";
 
+function formatCnpj(value) {
+  const rawDigits = String(value || "").replace(/\D/g, "");
+  if (!rawDigits) return "";
+  const digits = rawDigits.length <= 14 ? rawDigits.padStart(14, "0") : rawDigits;
+  if (digits.length !== 14) return String(value || "");
+  return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+}
+
 function formatCurrency(value) {
   if (!Number.isFinite(value)) return "-";
   return value.toLocaleString("pt-BR", {
@@ -348,7 +356,7 @@ function renderBroadband(items) {
 
 async function loadDetail() {
   setPageTitle();
-  detailCnpj.textContent = cnpj || "-";
+  detailCnpj.textContent = formatCnpj(cnpj) || "-";
 
   if (!cnpj || !detailType) {
     renderEmpty("Abra o detalhamento a partir de um card consultado.");
@@ -363,6 +371,7 @@ async function loadDetail() {
   const data = await response.json();
 
   detailCompanyName.textContent = data.company_name || "-";
+  detailCnpj.textContent = formatCnpj(data.cnpj || data.normalized || cnpj) || "-";
   if (data.message) {
     renderEmpty(data.message);
     return;
