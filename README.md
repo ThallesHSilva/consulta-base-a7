@@ -41,7 +41,7 @@ Variaveis recomendadas em producao:
 HOST=127.0.0.1
 PORT=8000
 PUBLIC_BASE_URL=https://seu-dominio.com.br
-SESSION_COOKIE_SECURE=1
+SESSION_COOKIE_SECURE=auto
 MAX_UPLOAD_BYTES=314572800
 APP_TIMEZONE=America/Sao_Paulo
 ADMIN_EMAIL=admin@seu-dominio.com.br
@@ -60,7 +60,8 @@ Observacoes importantes:
 - Se usar Nginx como proxy reverso, mantenha `HOST=127.0.0.1` e exponha somente o Nginx para a internet.
 - Se for expor a aplicacao diretamente sem Nginx, use `HOST=0.0.0.0`, mas o recomendado e usar Nginx com HTTPS.
 - Configure `PUBLIC_BASE_URL` para que os links de confirmacao de e-mail e redefinicao de senha saiam com o dominio correto.
-- Use `SESSION_COOKIE_SECURE=1` somente quando o acesso externo estiver em HTTPS.
+- Use `SESSION_COOKIE_SECURE=auto` para que o cookie de sessao use `Secure` somente quando a requisicao chegar como HTTPS via `X-Forwarded-Proto`.
+- Use `SESSION_COOKIE_SECURE=1` apenas quando todo acesso estiver em HTTPS. Em teste por HTTP direto, use `auto` ou `0`.
 - A sessão de login dura no máximo 2 horas. Um novo login da mesma conta invalida automaticamente a sessão anterior, inclusive em outro dispositivo.
 - O painel administrativo envia os CSVs por `POST /api/admin/data/upload`; o envio exige usuario `ADMIN` e pode ser feito em etapas.
 - Os CSVs de `data/` são ignorados pelo Git e pelo contexto de build do Docker. A imagem não contém bases operacionais.
@@ -87,7 +88,7 @@ WorkingDirectory=/opt/consulta-base
 Environment=HOST=127.0.0.1
 Environment=PORT=8000
 Environment=PUBLIC_BASE_URL=https://seu-dominio.com.br
-Environment=SESSION_COOKIE_SECURE=1
+Environment=SESSION_COOKIE_SECURE=auto
 Environment=MAX_UPLOAD_BYTES=314572800
 Environment=APP_TIMEZONE=America/Sao_Paulo
 Environment=ADMIN_EMAIL=admin@seu-dominio.com.br
