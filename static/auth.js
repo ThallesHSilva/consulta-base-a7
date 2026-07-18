@@ -50,6 +50,15 @@ async function postJson(url, payload) {
   return { response, data };
 }
 
+async function sessionIsActive() {
+  try {
+    const response = await fetch("/api/auth/me", { cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 function setSubmitLoading(form, loading) {
   const button = form?.querySelector("button[type='submit']");
   if (!button) return;
@@ -481,6 +490,12 @@ loginForm?.addEventListener("submit", async (event) => {
       sessionStorage.setItem("verificationEmail", document.querySelector("#loginEmail").value);
       resendVerificationButton.hidden = false;
     }
+    return;
+  }
+  if (!(await sessionIsActive())) {
+    showAuthMessage(
+      "Login validado, mas a sessao nao foi mantida. Verifique o acesso HTTPS ou a configuracao SESSION_COOKIE_SECURE."
+    );
     return;
   }
   window.location.href = data.redirect || "/app";
