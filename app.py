@@ -36,7 +36,7 @@ AUTH_DB_PATH = CACHE_DIR / "auth.sqlite3"
 STATIC_DIR = ROOT / "static"
 SEARCH_LIMIT = 500
 SESSION_COOKIE = "consulta_base_session"
-SESSION_DURATION_HOURS = 12
+SESSION_DURATION_HOURS = 2
 PASSWORD_RESET_MINUTES = 30
 PASSWORD_RESET_WINDOW_SECONDS = 15 * 60
 PASSWORD_RESET_EMAIL_LIMIT = 3
@@ -47,8 +47,8 @@ EMAIL_VERIFICATION_EMAIL_LIMIT = 3
 EMAIL_VERIFICATION_IP_LIMIT = 10
 PASSWORD_HASH_ITERATIONS = 260_000
 AUTH_STATUSES = {"PENDENTE_APROVACAO", "ATIVO", "BLOQUEADO", "CANCELADO"}
-AUTH_PROFILES = {"ADMIN", "SUPERVISOR", "USUARIO"}
-REPORT_PROFILES = {"ADMIN", "SUPERVISOR"}
+AUTH_PROFILES = {"ADMIN", "GESTOR", "SUPERVISOR", "USUARIO"}
+REPORT_PROFILES = {"ADMIN", "GESTOR", "SUPERVISOR"}
 GENERIC_RESET_MESSAGE = (
     "Se o e-mail estiver cadastrado, enviaremos as instruções para redefinição de senha."
 )
@@ -246,6 +246,8 @@ def public_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         "email_confirmado": bool(row["email_confirmado_em"]),
         "equipe_id": row["equipe_id"],
         "equipe_nome": row["equipe_nome"] if "equipe_nome" in row.keys() else "",
+        "gestor_id": row["gestor_id"] if "gestor_id" in row.keys() else None,
+        "gestor_nome": row["gestor_nome"] if "gestor_nome" in row.keys() else "",
     }
 
 
@@ -279,6 +281,20 @@ def cnpj_digits(value: Any) -> str:
 def cnpj_key(value: Any) -> str:
     digits = cnpj_digits(value)
     return digits.lstrip("0") or ("0" if digits else "")
+
+
+def format_cnpj_display(value: Any) -> str:
+    digits = cnpj_digits(value)
+    if not digits:
+        return ""
+    if len(digits) <= 14:
+        digits = digits.zfill(14)
+    if len(digits) != 14:
+        return digits
+    return (
+        f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/"
+        f"{digits[8:12]}-{digits[12:]}"
+    )
 
 
 def mobile_line_key(value: Any) -> str:
@@ -500,7 +516,10 @@ def parse_multipart_form(content_type: str, body: bytes) -> list[dict[str, Any]]
     return parts
 
 
-def save_uploaded_data_files(parts: list[dict[str, Any]]) -> tuple[HTTPStatus, dict[str, Any]]:
+def save_uploaded_data_files(
+    parts: list[dict[str, Any]],
+    refresh_after_upload: bool = True,
+) -> tuple[HTTPStatus, dict[str, Any]]:
     selected_parts: dict[str, dict[str, Any]] = {}
     unknown_fields: list[str] = []
 
@@ -578,6 +597,27 @@ def save_uploaded_data_files(parts: list[dict[str, Any]]) -> tuple[HTTPStatus, d
         for temp_path in temp_paths:
             if temp_path.exists():
                 temp_path.unlink()
+
+    if not refresh_after_upload:
+        pending_files = missing_files()
+        return (
+            HTTPStatus.OK,
+            {
+                "ok": True,
+                "message": (
+                    "Arquivo recebido e salvo com sucesso."
+                    if not pending_files
+                    else (
+                        "Arquivo recebido e salvo. Bases obrigatórias pendentes: "
+                        + ", ".join(pending_files)
+                    )
+                ),
+                "uploaded": uploaded,
+                "ready": False,
+                "missing_files": pending_files,
+                "sources": [],
+            },
+        )
 
     state = refresh_data(force_rebuild=True)
     missing = state.get("missing_files", [])
@@ -673,8 +713,10 @@ def initialize_auth_database() -> None:
                 data_cancelamento TEXT,
                 ultimo_login TEXT,
                 equipe_id INTEGER,
+                gestor_id INTEGER,
                 FOREIGN KEY (aprovado_por) REFERENCES users(id),
-                FOREIGN KEY (equipe_id) REFERENCES equipes(id)
+                FOREIGN KEY (equipe_id) REFERENCES equipes(id),
+                FOREIGN KEY (gestor_id) REFERENCES users(id)
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -790,7 +832,10 @@ def initialize_auth_database() -> None:
             )
         if "equipe_id" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN equipe_id INTEGER REFERENCES equipes(id)")
+        if "gestor_id" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN gestor_id INTEGER REFERENCES users(id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_equipe ON users(equipe_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_gestor ON users(gestor_id)")
         conn.commit()
         backfill_search_events(conn)
         ensure_initial_admin(conn)
@@ -1087,6 +1132,11 @@ def load_client_profile(conn: sqlite3.Connection, key: str) -> dict[str, str]:
     posse = ""
     primeira_oferta = ""
     digital = ""
+    fixa_basica = ""
+    vivo_tech = ""
+    avancada = ""
+    movel = ""
+    vvn = ""
     contact_manager = ""
     contact_email = ""
     contact_mobile = ""
@@ -1102,6 +1152,16 @@ def load_client_profile(conn: sqlite3.Connection, key: str) -> dict[str, str]:
             primeira_oferta = clean_cell(payload.get("PRIMEIRA_OFERTA"))
         if not digital:
             digital = clean_cell(payload.get("DIGITAL_1"))
+        if not fixa_basica:
+            fixa_basica = clean_cell(payload.get("FIXA_BASICA"))
+        if not vivo_tech:
+            vivo_tech = clean_cell(payload.get("VIVO_TECH"))
+        if not avancada:
+            avancada = clean_cell(payload.get("AVANCADOS"))
+        if not movel:
+            movel = clean_cell(payload.get("MOVEL"))
+        if not vvn:
+            vvn = clean_cell(payload.get("VVN"))
         if not contact_manager:
             contact_manager = clean_cell(payload.get("NM_CONTATO_SFA"))
         if not contact_email:
@@ -1114,6 +1174,11 @@ def load_client_profile(conn: sqlite3.Connection, key: str) -> dict[str, str]:
             and posse
             and primeira_oferta
             and digital
+            and fixa_basica
+            and vivo_tech
+            and avancada
+            and movel
+            and vvn
             and contact_manager
             and contact_email
             and contact_mobile
@@ -1126,6 +1191,11 @@ def load_client_profile(conn: sqlite3.Connection, key: str) -> dict[str, str]:
         "posse": posse,
         "primeira_oferta": primeira_oferta,
         "digital": digital,
+        "fixa_basica": fixa_basica,
+        "vivo_tech": vivo_tech,
+        "avancada": avancada,
+        "movel": movel,
+        "vvn": vvn,
         "contact_manager": contact_manager,
         "contact_email": contact_email,
         "contact_mobile": contact_mobile,
@@ -1475,6 +1545,7 @@ def query_detail(value: str, detail_type: str) -> dict[str, Any]:
     if not key:
         return {
             "query": value,
+            "cnpj": "",
             "normalized": "",
             "type": detail_type,
             "company_name": "",
@@ -1492,6 +1563,7 @@ def query_detail(value: str, detail_type: str) -> dict[str, Any]:
         else:
             return {
                 "query": value,
+                "cnpj": format_cnpj_display(key),
                 "normalized": key,
                 "type": detail_type,
                 "company_name": company_name,
@@ -1501,6 +1573,7 @@ def query_detail(value: str, detail_type: str) -> dict[str, Any]:
 
     return {
         "query": value,
+        "cnpj": format_cnpj_display(key),
         "normalized": key,
         "type": detail_type,
         "company_name": company_name,
@@ -1544,6 +1617,7 @@ def query_cnpj(value: str) -> dict[str, Any]:
     if not key:
         return {
             "query": value,
+            "cnpj": "",
             "total": 0,
             "company_name": "",
             "client_status": "",
@@ -1552,6 +1626,11 @@ def query_cnpj(value: str) -> dict[str, Any]:
                 "posse": "",
                 "primeira_oferta": "",
                 "digital": "",
+                "fixa_basica": "",
+                "vivo_tech": "",
+                "avancada": "",
+                "movel": "",
+                "vvn": "",
             },
             "contacts": {
                 "manager": "",
@@ -1606,6 +1685,7 @@ def query_cnpj(value: str) -> dict[str, Any]:
 
     return {
         "query": value,
+        "cnpj": format_cnpj_display(key),
         "normalized": key,
         "total": total,
         "shown": len(results),
@@ -1618,6 +1698,11 @@ def query_cnpj(value: str) -> dict[str, Any]:
             "posse": client_profile["posse"],
             "primeira_oferta": client_profile["primeira_oferta"],
             "digital": client_profile["digital"],
+            "fixa_basica": client_profile["fixa_basica"],
+            "vivo_tech": client_profile["vivo_tech"],
+            "avancada": client_profile["avancada"],
+            "movel": client_profile["movel"],
+            "vvn": client_profile["vvn"],
         },
         "contacts": {
             "manager": client_profile["contact_manager"],
@@ -1713,7 +1798,7 @@ def build_cnpj_pdf(value: str) -> tuple[HTTPStatus, bytes | dict[str, Any], str]
         "",
         "Cliente",
         f"Razão social: {data.get('company_name') or '-'}",
-        f"CNPJ: {data.get('query') or data.get('normalized') or '-'}",
+        f"CNPJ: {data.get('cnpj') or format_cnpj_display(data.get('normalized')) or '-'}",
         f"Status: {data.get('client_status') or '-'}",
         f"Carteira: {data.get('client_portfolio') or '-'}",
         f"Crédito de aparelho: {data.get('device_credit') or '-'}",
@@ -1733,7 +1818,7 @@ def build_cnpj_pdf(value: str) -> tuple[HTTPStatus, bytes | dict[str, Any], str]
         "Distribuição por fidelização",
         *range_lines,
     ]
-    filename_digits = cnpj_digits(value) or "consulta"
+    filename_digits = cnpj_digits(data.get("cnpj")) or "consulta"
     filename = f"consulta-cnpj-{filename_digits}.pdf"
     return HTTPStatus.OK, build_simple_pdf(lines, "Consulta por CNPJ"), filename
 
@@ -1804,6 +1889,10 @@ def create_session(
     token = secrets.token_urlsafe(32)
     now = utc_now()
     expiration = now + timedelta(hours=SESSION_DURATION_HOURS)
+    conn.execute(
+        "UPDATE sessions SET ativo = 0 WHERE user_id = ? AND ativo = 1",
+        (user_id,),
+    )
     conn.execute(
         """
         INSERT INTO sessions (
@@ -1896,7 +1985,9 @@ def lookup_session_user(token: str) -> dict[str, Any] | None:
     if not token:
         return None
 
-    now = utc_iso()
+    now_dt = utc_now()
+    now = utc_iso(now_dt)
+    session_cutoff = utc_iso(now_dt - timedelta(hours=SESSION_DURATION_HOURS))
     with open_auth_db() as conn:
         row = conn.execute(
             """
@@ -1907,8 +1998,9 @@ def lookup_session_user(token: str) -> dict[str, Any] | None:
             WHERE s.token_hash = ?
               AND s.ativo = 1
               AND s.data_expiracao > ?
+              AND s.data_criacao > ?
             """,
-            (hash_token(token), now),
+            (hash_token(token), now, session_cutoff),
         ).fetchone()
         if not row:
             return None
@@ -1948,8 +2040,11 @@ def logout_session(token: str) -> None:
 
 def list_users(search: str = "", status: str = "") -> list[dict[str, Any]]:
     query = """
-        SELECT users.*, COALESCE(equipes.nome, '') AS equipe_nome
-        FROM users LEFT JOIN equipes ON equipes.id = users.equipe_id
+        SELECT users.*, COALESCE(equipes.nome, '') AS equipe_nome,
+               COALESCE(gestores.nome_completo, '') AS gestor_nome
+        FROM users
+        LEFT JOIN equipes ON equipes.id = users.equipe_id
+        LEFT JOIN users AS gestores ON gestores.id = users.gestor_id
         WHERE 1 = 1
     """
     params: list[Any] = []
@@ -1976,6 +2071,19 @@ def list_teams() -> list[dict[str, Any]]:
             """SELECT equipes.id, equipes.nome, COUNT(users.id) AS total_membros
                FROM equipes LEFT JOIN users ON users.equipe_id = equipes.id
                GROUP BY equipes.id, equipes.nome ORDER BY equipes.nome COLLATE NOCASE"""
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_managers() -> list[dict[str, Any]]:
+    with open_auth_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, nome_completo, email, status
+            FROM users
+            WHERE perfil = 'GESTOR' AND status != 'CANCELADO'
+            ORDER BY nome_completo COLLATE NOCASE
+            """
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -2010,6 +2118,38 @@ def assign_user_team(user_id: int, team_id: int | None) -> tuple[HTTPStatus, dic
     return HTTPStatus.OK, {"ok": True, "message": "Equipe do usuário atualizada com sucesso."}
 
 
+def assign_user_manager(user_id: int, manager_id: int | None) -> tuple[HTTPStatus, dict[str, Any]]:
+    with open_auth_db() as conn:
+        user = fetch_user_by_id(conn, user_id)
+        if not user:
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
+        if user["perfil"] != "SUPERVISOR":
+            return HTTPStatus.BAD_REQUEST, {
+                "ok": False,
+                "message": "Somente supervisores podem ser vinculados a um gestor.",
+            }
+        if manager_id is not None:
+            manager = fetch_user_by_id(conn, manager_id)
+            if not manager or manager["perfil"] != "GESTOR":
+                return HTTPStatus.BAD_REQUEST, {
+                    "ok": False,
+                    "message": "Selecione um usuário com perfil de gestor.",
+                }
+            if manager["status"] == "CANCELADO":
+                return HTTPStatus.BAD_REQUEST, {
+                    "ok": False,
+                    "message": "Não é possível vincular um supervisor a um gestor cancelado.",
+                }
+        conn.execute("UPDATE users SET gestor_id = ? WHERE id = ?", (manager_id, user_id))
+        conn.commit()
+    message = (
+        "Gestor do supervisor atualizado com sucesso."
+        if manager_id is not None
+        else "Supervisor removido da gestão com sucesso."
+    )
+    return HTTPStatus.OK, {"ok": True, "message": message}
+
+
 def assign_user_profile(
     admin_user: dict[str, Any],
     user_id: int,
@@ -2033,6 +2173,16 @@ def assign_user_profile(
                 "ok": False,
                 "message": "Vincule o usuário a uma equipe antes de torná-lo supervisor.",
             }
+        if user["perfil"] == "GESTOR" and normalized_profile != "GESTOR":
+            supervisors_count = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE gestor_id = ? AND perfil = 'SUPERVISOR'",
+                (user_id,),
+            ).fetchone()[0]
+            if supervisors_count:
+                return HTTPStatus.BAD_REQUEST, {
+                    "ok": False,
+                    "message": "Reatribua os supervisores deste gestor antes de alterar seu perfil.",
+                }
         if user["perfil"] == "ADMIN" and normalized_profile != "ADMIN":
             admin_count = conn.execute(
                 "SELECT COUNT(*) FROM users WHERE perfil = 'ADMIN'"
@@ -2043,10 +2193,18 @@ def assign_user_profile(
                     "message": "O sistema precisa manter ao menos um administrador.",
                 }
 
-        conn.execute("UPDATE users SET perfil = ? WHERE id = ?", (normalized_profile, user_id))
+        conn.execute(
+            "UPDATE users SET perfil = ?, gestor_id = CASE WHEN ? = 'SUPERVISOR' THEN gestor_id ELSE NULL END WHERE id = ?",
+            (normalized_profile, normalized_profile, user_id),
+        )
         conn.commit()
 
-    labels = {"ADMIN": "Administrador", "SUPERVISOR": "Supervisor", "USUARIO": "Usuário"}
+    labels = {
+        "ADMIN": "Administrador",
+        "GESTOR": "Gestor",
+        "SUPERVISOR": "Supervisor",
+        "USUARIO": "Usuário",
+    }
     return HTTPStatus.OK, {
         "ok": True,
         "message": f"Perfil atualizado para {labels[normalized_profile]}.",
@@ -2062,7 +2220,11 @@ def save_search_history(
     if not key:
         return
 
-    display = clean_cell(result.get("query")) or clean_cell(query_value) or key
+    display = (
+        clean_cell(result.get("cnpj"))
+        or format_cnpj_display(query_value)
+        or format_cnpj_display(key)
+    )
     company_name = clean_cell(result.get("company_name"))
     try:
         total = int(result.get("total") or 0)
@@ -2125,7 +2287,7 @@ def list_search_history(user_id: int) -> list[dict[str, Any]]:
     return [
         {
             "cnpj_key": row["cnpj_key"],
-            "cnpj": row["cnpj_display"],
+            "cnpj": format_cnpj_display(row["cnpj_display"] or row["cnpj_key"]),
             "company_name": row["company_name"] or "",
             "data_consulta": row["data_consulta"],
             "total": row["total"],
@@ -2135,7 +2297,43 @@ def list_search_history(user_id: int) -> list[dict[str, Any]]:
     ]
 
 
-def usage_ranking_report(team_id: int | None = None, team_name: str = "") -> dict[str, Any]:
+def manager_report_scope(manager_id: int) -> dict[str, Any]:
+    with open_auth_db() as conn:
+        supervisors = conn.execute(
+            """
+            SELECT users.id, users.nome_completo, users.equipe_id,
+                   COALESCE(equipes.nome, '') AS equipe_nome
+            FROM users
+            LEFT JOIN equipes ON equipes.id = users.equipe_id
+            WHERE users.gestor_id = ? AND users.perfil = 'SUPERVISOR'
+            ORDER BY users.nome_completo COLLATE NOCASE
+            """,
+            (manager_id,),
+        ).fetchall()
+    return {
+        "team_ids": sorted({row["equipe_id"] for row in supervisors if row["equipe_id"] is not None}),
+        "supervisors": [
+            {
+                "id": row["id"],
+                "nome_completo": row["nome_completo"],
+                "equipe_id": row["equipe_id"],
+                "equipe_nome": row["equipe_nome"],
+            }
+            for row in supervisors
+        ],
+    }
+
+
+def usage_ranking_report(
+    team_id: int | None = None,
+    team_name: str = "",
+    *,
+    team_ids: list[int] | None = None,
+    manager_name: str = "",
+    supervisors: list[dict[str, Any]] | None = None,
+    filter_team_id: int | None = None,
+    filter_user_id: int | None = None,
+) -> dict[str, Any]:
     zone = app_zoneinfo()
     now_utc = utc_now()
     now_local = now_utc.astimezone(zone)
@@ -2143,30 +2341,78 @@ def usage_ranking_report(team_id: int | None = None, team_name: str = "") -> dic
     month_key = (now_local.year, now_local.month)
 
     with open_auth_db() as conn:
-        users_query = """
+        users_select = """
             SELECT users.id, users.nome_completo, users.email, users.perfil,
                    users.status, users.ultimo_login,
                    users.equipe_id, COALESCE(equipes.nome, 'Sem equipe') AS equipe_nome
             FROM users LEFT JOIN equipes ON equipes.id = users.equipe_id
         """
-        users_params: list[Any] = []
-        if team_id is not None:
-            users_query += " WHERE users.equipe_id = ?"
-            users_params.append(team_id)
-        users_query += " ORDER BY nome_completo COLLATE NOCASE"
-        users = conn.execute(users_query, users_params).fetchall()
+        scoped_team_ids = team_ids if team_ids is not None else ([team_id] if team_id is not None else None)
+        base_conditions: list[str] = []
+        base_params: list[Any] = []
+        if scoped_team_ids is not None:
+            if scoped_team_ids:
+                placeholders = ", ".join("?" for _ in scoped_team_ids)
+                base_conditions.append(f"users.equipe_id IN ({placeholders})")
+                base_params.extend(scoped_team_ids)
+            else:
+                base_conditions.append("0 = 1")
+
+        base_where = " WHERE " + " AND ".join(base_conditions) if base_conditions else ""
+        available_users = conn.execute(
+            users_select + base_where + " ORDER BY nome_completo COLLATE NOCASE",
+            base_params,
+        ).fetchall()
+
+        filter_conditions = list(base_conditions)
+        filter_params = list(base_params)
+        if filter_team_id is not None:
+            filter_conditions.append("users.equipe_id = ?")
+            filter_params.append(filter_team_id)
+        if filter_user_id is not None:
+            filter_conditions.append("users.id = ?")
+            filter_params.append(filter_user_id)
+        filter_where = " WHERE " + " AND ".join(filter_conditions) if filter_conditions else ""
+        users = conn.execute(
+            users_select + filter_where + " ORDER BY nome_completo COLLATE NOCASE",
+            filter_params,
+        ).fetchall()
 
         events_query = """
             SELECT search_events.user_id, search_events.cnpj_key,
                    search_events.cnpj_display, search_events.company_name,
                    search_events.data_consulta
             FROM search_events
+            JOIN users ON users.id = search_events.user_id
         """
-        events_params: list[Any] = []
-        if team_id is not None:
-            events_query += " JOIN users ON users.id = search_events.user_id WHERE users.equipe_id = ?"
-            events_params.append(team_id)
-        events = conn.execute(events_query, events_params).fetchall()
+        events = conn.execute(events_query + filter_where, filter_params).fetchall()
+
+    team_options_by_id = {
+        user["equipe_id"]: {"id": user["equipe_id"], "nome": user["equipe_nome"]}
+        for user in available_users
+        if user["equipe_id"] is not None
+    }
+    team_options = sorted(
+        team_options_by_id.values(),
+        key=lambda item: item["nome"].casefold(),
+    )
+    user_options = [
+        {
+            "id": user["id"],
+            "nome_completo": user["nome_completo"],
+            "equipe_id": user["equipe_id"],
+            "equipe_nome": user["equipe_nome"],
+        }
+        for user in available_users
+    ]
+    selected_team = next(
+        (item for item in team_options if item["id"] == filter_team_id),
+        None,
+    )
+    selected_user = next(
+        (item for item in user_options if item["id"] == filter_user_id),
+        None,
+    )
 
     stats: dict[int, dict[str, Any]] = {}
     for user in users:
@@ -2227,7 +2473,7 @@ def usage_ranking_report(team_id: int | None = None, team_name: str = "") -> dic
 
         client_key = event["cnpj_key"]
         client = client_counts.setdefault(client_key, {
-            "cnpj": event["cnpj_display"] or client_key,
+            "cnpj": format_cnpj_display(event["cnpj_display"] or client_key),
             "cliente": event["company_name"] or "Cliente não identificado",
             "consultas": 0,
             "usuarios": set(),
@@ -2277,12 +2523,22 @@ def usage_ranking_report(team_id: int | None = None, team_name: str = "") -> dic
     return {
         "ok": True,
         "scope": {
-            "type": "team" if team_id is not None else "global",
+            "type": "manager" if team_ids is not None else ("team" if team_id is not None else "global"),
             "team_id": team_id,
             "team_name": team_name if team_id is not None else "",
+            "manager_name": manager_name if team_ids is not None else "",
+            "supervisors": supervisors or [],
         },
         "timezone": APP_TIMEZONE,
         "generated_at": utc_iso(now_utc),
+        "filters": {
+            "teams": team_options,
+            "users": user_options,
+            "selected_team_id": filter_team_id,
+            "selected_team_name": selected_team["nome"] if selected_team else "",
+            "selected_user_id": filter_user_id,
+            "selected_user_name": selected_user["nome_completo"] if selected_user else "",
+        },
         "summary": {
             "usuarios": len(items),
             "usuarios_ativos": active_users,
@@ -2318,6 +2574,16 @@ def update_user_status(
                 HTTPStatus.BAD_REQUEST,
                 {"ok": False, "message": "Não é possível bloquear ou cancelar seu próprio usuário."},
             )
+        if user["perfil"] == "GESTOR" and normalized_action == "cancelar":
+            supervisors_count = conn.execute(
+                "SELECT COUNT(*) FROM users WHERE gestor_id = ? AND perfil = 'SUPERVISOR'",
+                (user_id,),
+            ).fetchone()[0]
+            if supervisors_count:
+                return HTTPStatus.BAD_REQUEST, {
+                    "ok": False,
+                    "message": "Reatribua os supervisores deste gestor antes de cancelar seu cadastro.",
+                }
 
         if normalized_action == "aprovar":
             if user["status"] != "PENDENTE_APROVACAO":
@@ -2928,7 +3194,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             return None
         if reports and user["perfil"] not in REPORT_PROFILES:
             self.send_json(
-                {"ok": False, "message": "Acesso restrito a administradores e supervisores."},
+                {"ok": False, "message": "Acesso restrito a administradores, gestores e supervisores."},
                 status=HTTPStatus.FORBIDDEN,
             )
             return None
@@ -3023,6 +3289,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                         params.get("search", [""])[0],
                         params.get("status", [""])[0],
                     ),
+                    "managers": list_managers(),
                 }
             )
             return
@@ -3037,6 +3304,18 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             user = self.require_api_user(reports=True)
             if not user:
                 return
+            params = parse_qs(parsed.query)
+            try:
+                raw_team_filter = params.get("team_id", [""])[0]
+                raw_user_filter = params.get("user_id", [""])[0]
+                filter_team_id = int(raw_team_filter) if raw_team_filter else None
+                filter_user_id = int(raw_user_filter) if raw_user_filter else None
+            except (TypeError, ValueError):
+                self.send_json(
+                    {"ok": False, "message": "Filtro de equipe ou usuário inválido."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
             if user["perfil"] == "SUPERVISOR" and user["equipe_id"] is None:
                 self.send_json(
                     {
@@ -3046,9 +3325,34 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                     status=HTTPStatus.FORBIDDEN,
                 )
                 return
-            team_id = user["equipe_id"] if user["perfil"] == "SUPERVISOR" else None
-            team_name = user["equipe_nome"] if user["perfil"] == "SUPERVISOR" else ""
-            self.send_json(usage_ranking_report(team_id=team_id, team_name=team_name))
+            if user["perfil"] == "SUPERVISOR":
+                self.send_json(
+                    usage_ranking_report(
+                        team_id=user["equipe_id"],
+                        team_name=user["equipe_nome"],
+                        filter_team_id=filter_team_id,
+                        filter_user_id=filter_user_id,
+                    )
+                )
+                return
+            if user["perfil"] == "GESTOR":
+                scope = manager_report_scope(user["id"])
+                self.send_json(
+                    usage_ranking_report(
+                        team_ids=scope["team_ids"],
+                        manager_name=user["nome_completo"],
+                        supervisors=scope["supervisors"],
+                        filter_team_id=filter_team_id,
+                        filter_user_id=filter_user_id,
+                    )
+                )
+                return
+            self.send_json(
+                usage_ranking_report(
+                    filter_team_id=filter_team_id,
+                    filter_user_id=filter_user_id,
+                )
+            )
             return
 
         if parsed.path == "/api/status":
@@ -3144,7 +3448,13 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
 
             try:
                 parts = parse_multipart_form(self.headers.get("Content-Type", ""), body)
-                response_status, response = save_uploaded_data_files(parts)
+                params = parse_qs(parsed.query)
+                refresh_value = clean_cell(params.get("refresh", ["1"])[0]).lower()
+                refresh_after_upload = refresh_value not in {"0", "false", "nao", "não"}
+                response_status, response = save_uploaded_data_files(
+                    parts,
+                    refresh_after_upload=refresh_after_upload,
+                )
             except ValueError as error:
                 self.send_json(
                     {"ok": False, "message": str(error)},
@@ -3305,6 +3615,24 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 )
                 return
             status, response = assign_user_profile(admin_user, user_id, data.get("perfil"))
+            self.send_json(response, status=status)
+            return
+
+        if parsed.path == "/api/admin/users/manager":
+            data = self.read_json_body()
+            if not self.require_api_user(admin=True):
+                return
+            try:
+                user_id = int(data.get("user_id"))
+                raw_manager_id = data.get("gestor_id")
+                manager_id = None if raw_manager_id in (None, "") else int(raw_manager_id)
+            except (TypeError, ValueError):
+                self.send_json(
+                    {"ok": False, "message": "Usuário ou gestor inválido."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            status, response = assign_user_manager(user_id, manager_id)
             self.send_json(response, status=status)
             return
 

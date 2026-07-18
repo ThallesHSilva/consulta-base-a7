@@ -14,6 +14,11 @@ const offersContent = document.querySelector("#offersContent");
 const offerPosseValue = document.querySelector("#offerPosseValue");
 const offerFirstValue = document.querySelector("#offerFirstValue");
 const offerDigitalValue = document.querySelector("#offerDigitalValue");
+const offerBasicFixedValue = document.querySelector("#offerBasicFixedValue");
+const offerVivoTechValue = document.querySelector("#offerVivoTechValue");
+const offerAdvancedValue = document.querySelector("#offerAdvancedValue");
+const offerMobileValue = document.querySelector("#offerMobileValue");
+const offerVvnValue = document.querySelector("#offerVvnValue");
 const contactsPanel = document.querySelector("#contactsPanel");
 const contactManagerValue = document.querySelector("#contactManagerValue");
 const contactEmailValue = document.querySelector("#contactEmailValue");
@@ -76,6 +81,12 @@ function formatCnpj(value) {
     return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8)}`;
   }
   return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`;
+}
+
+function formatCanonicalCnpj(value) {
+  const digits = onlyDigits(String(value || ""));
+  if (!digits) return "";
+  return formatCnpj(digits.length <= 14 ? digits.padStart(14, "0") : digits);
 }
 
 function numberOrZero(value) {
@@ -213,8 +224,8 @@ function renderCompanyName(companyName) {
 }
 
 function renderClientContext(data) {
-  const cnpj = data?.query || data?.normalized || cnpjInput.value || "";
-  clientCnpjValue.textContent = cnpj ? formatCnpj(cnpj) : "-";
+  const cnpj = data?.cnpj || data?.normalized || data?.query || cnpjInput.value || "";
+  clientCnpjValue.textContent = cnpj ? formatCanonicalCnpj(cnpj) : "-";
   clientStatusValue.textContent = data?.client_status || "-";
   clientSegmentValue.textContent = data?.client_portfolio || "-";
 }
@@ -230,6 +241,11 @@ function renderOffers(offers) {
   offerPosseValue.textContent = offers?.posse || "-";
   offerFirstValue.textContent = offers?.primeira_oferta || "-";
   offerDigitalValue.textContent = offers?.digital || "-";
+  offerBasicFixedValue.textContent = offers?.fixa_basica || "-";
+  offerVivoTechValue.textContent = offers?.vivo_tech || "-";
+  offerAdvancedValue.textContent = offers?.avancada || "-";
+  offerMobileValue.textContent = offers?.movel || "-";
+  offerVvnValue.textContent = offers?.vvn || "-";
 }
 
 function renderContacts(contacts) {
@@ -334,7 +350,11 @@ function renderResults(data) {
   }
 
   hideMessage();
-  lastSuccessfulCnpj = data.query || data.normalized || cnpjInput.value;
+  lastSuccessfulCnpj = data.cnpj || formatCanonicalCnpj(data.normalized || data.query || cnpjInput.value);
+  cnpjInput.value = lastSuccessfulCnpj;
+  const canonicalParams = new URLSearchParams(window.location.search);
+  canonicalParams.set("cnpj", lastSuccessfulCnpj);
+  window.history.replaceState({}, "", `/app?${canonicalParams.toString()}`);
   setPanelsVisible(true);
   renderCompanyName(data.company_name);
   renderClientContext(data);
@@ -344,7 +364,7 @@ function renderResults(data) {
   renderMetrics(data.metrics, data.mobile_info);
   renderBroadbandAvailability(data.metrics, data.broadband_availability);
   renderMobileInfo(data.mobile_info);
-  renderDetailLinks(data.query || data.normalized);
+  renderDetailLinks(data.cnpj || formatCanonicalCnpj(data.normalized || data.query));
 }
 
 async function loadStatus() {
@@ -389,7 +409,7 @@ async function search(cnpj) {
 function updatePrintReportHeader() {
   if (!printReportHeader) return;
   printReportHeader.hidden = false;
-  printReportCnpj.textContent = lastSuccessfulCnpj ? formatCnpj(lastSuccessfulCnpj) : "-";
+  printReportCnpj.textContent = lastSuccessfulCnpj ? formatCanonicalCnpj(lastSuccessfulCnpj) : "-";
   printReportDate.textContent = new Date().toLocaleString("pt-BR", {
     dateStyle: "short",
     timeStyle: "short",

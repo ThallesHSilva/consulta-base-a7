@@ -24,6 +24,17 @@
     window.location.href = "/login";
   }
 
+  async function verifyActiveSession() {
+    try {
+      const response = await fetch("/api/auth/me", { cache: "no-store" });
+      if (response.status === 401) {
+        window.location.replace("/login");
+      }
+    } catch (error) {
+      // Falhas momentâneas de rede não encerram a sessão local.
+    }
+  }
+
   logoutButton?.addEventListener("click", logout);
 
   try {
@@ -42,13 +53,15 @@
     if (userName) userName.textContent = user.nome_completo || "Usuário";
     const roleLabels = {
       ADMIN: "Administrador",
+      GESTOR: "Gestor",
       SUPERVISOR: "Supervisor",
       USUARIO: "Usuário",
     };
     if (userRole) userRole.textContent = roleLabels[user.perfil] || user.perfil || "Perfil";
     if (userInitials) userInitials.textContent = initials(user.nome_completo);
     if (adminNavItem) adminNavItem.hidden = user.perfil !== "ADMIN";
-    if (adminReportsNavItem) adminReportsNavItem.hidden = !["ADMIN", "SUPERVISOR"].includes(user.perfil);
+    if (adminReportsNavItem) adminReportsNavItem.hidden = !["ADMIN", "GESTOR", "SUPERVISOR"].includes(user.perfil);
+    window.setInterval(verifyActiveSession, 30_000);
   } catch (error) {
     window.location.href = "/login";
   }
