@@ -12,11 +12,11 @@
     />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body class="reports-page">
     <div class="app-layout">
       <aside class="sidebar" aria-label="Navegação principal">
         <div class="sidebar-brand">
-          <img class="brand-logo" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+          <img class="brand-logo" src="/api/branding/logo" alt="Logo da empresa" />
         </div>
 
         <nav class="sidebar-nav">
@@ -76,8 +76,9 @@
         </div>
       </aside>
 
-      <main class="workspace">
-        <header class="page-header">
+      <main class="workspace reports-workspace">
+        <section class="reports-hero" aria-labelledby="reportsPageTitle">
+        <header class="page-header reports-page-header">
           <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Abrir menu">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 7h16" />
@@ -86,12 +87,13 @@
             </svg>
           </button>
           <div class="title-stack">
-            <span class="eyebrow">Relatórios</span>
-            <h1>Inteligência de utilização</h1>
+            <span class="eyebrow">Central de inteligência</span>
+            <h1 id="reportsPageTitle">Relatórios de utilização</h1>
             <p id="reportsScopeText">Acompanhe adoção, clientes consultados e desempenho de usuários e equipes.</p>
+            <span class="reports-live-status"><i aria-hidden="true"></i> Visão atualizada da operação</span>
           </div>
           <div class="header-actions">
-            <button id="reportsRefreshButton" class="ghost-button" type="button" title="Atualizar relatório">
+            <button id="reportsRefreshButton" class="ghost-button reports-refresh-button" type="button" title="Atualizar relatório">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M21 12a9 9 0 0 1-15 6.7" />
                 <path d="M3 12A9 9 0 0 1 18 5.3" />
@@ -102,19 +104,24 @@
             </button>
           </div>
         </header>
+        </section>
 
         <section class="dashboard-card report-filter-panel" aria-label="Filtros do relatório">
           <div class="report-filter-heading">
-            <span class="eyebrow">Visualização aprofundada</span>
-            <h2>Filtros do relatório</h2>
+            <span class="report-filter-icon" aria-hidden="true"></span>
+            <div>
+              <span class="eyebrow">Personalize a leitura</span>
+              <h2>Filtros do relatório</h2>
+              <p>Refine os indicadores por equipe ou usuário.</p>
+            </div>
           </div>
-          <label>
+          <label class="report-filter-control">
             <span>Equipe</span>
             <select id="reportsTeamFilter">
               <option value="">Todas as equipes</option>
             </select>
           </label>
-          <label>
+          <label class="report-filter-control">
             <span>Usuário</span>
             <select id="reportsUserFilter">
               <option value="">Todos os usuários</option>
@@ -126,51 +133,56 @@
         </section>
 
         <section class="reports-summary-grid" aria-label="Resumo de uso">
-          <article class="dashboard-card report-summary-card">
-            <span>Consultas hoje</span>
-            <strong id="dailyQueriesValue">0</strong>
+          <article class="dashboard-card report-summary-card summary-today">
+            <div class="report-summary-top"><span class="report-summary-icon" aria-hidden="true">01</span><span class="report-summary-period">Hoje</span></div>
+            <div class="report-summary-copy"><span>Consultas realizadas</span><strong id="dailyQueriesValue">0</strong></div>
+            <p>Volume registrado desde o início do dia</p>
           </article>
-          <article class="dashboard-card report-summary-card">
-            <span>Consultas no mês</span>
-            <strong id="monthlyQueriesValue">0</strong>
+          <article class="dashboard-card report-summary-card summary-month">
+            <div class="report-summary-top"><span class="report-summary-icon" aria-hidden="true">30</span><span class="report-summary-period">Mês</span></div>
+            <div class="report-summary-copy"><span>Consultas acumuladas</span><strong id="monthlyQueriesValue">0</strong></div>
+            <p>Movimentação no período atual</p>
           </article>
-          <article class="dashboard-card report-summary-card">
-            <span>Clientes únicos no mês</span>
-            <strong id="uniqueClientsValue">0</strong>
+          <article class="dashboard-card report-summary-card summary-clients">
+            <div class="report-summary-top"><span class="report-summary-icon" aria-hidden="true">C</span><span class="report-summary-period">Cobertura</span></div>
+            <div class="report-summary-copy"><span>Clientes únicos no mês</span><strong id="uniqueClientsValue">0</strong></div>
+            <p>Empresas diferentes consultadas</p>
           </article>
-          <article class="dashboard-card report-summary-card">
-            <span>Adoção no mês</span>
-            <strong id="adoptionValue">0%</strong>
+          <article id="adoptionSummaryCard" class="dashboard-card report-summary-card summary-adoption">
+            <div class="report-summary-top"><span class="report-summary-icon" aria-hidden="true">%</span><span class="report-summary-period">Adoção</span></div>
+            <div class="report-summary-copy"><span>Usuários ativos no mês</span><strong id="adoptionValue">0%</strong></div>
+            <div class="report-adoption-track" aria-hidden="true"><span></span></div>
           </article>
         </section>
 
         <section class="reports-analytics-grid">
-          <article class="dashboard-card analytics-card">
-            <div class="panel-title-row"><div><span class="eyebrow">Evolução</span><h2>Consultas nos últimos 14 dias</h2></div></div>
+          <article class="dashboard-card analytics-card trend-card">
+            <div class="panel-title-row"><div><span class="eyebrow">Evolução diária</span><h2>Consultas nos últimos 14 dias</h2><p>Ritmo de utilização ao longo das duas últimas semanas.</p></div><span class="analytics-card-mark" aria-hidden="true">14d</span></div>
             <div id="dailyTrendChart" class="bar-chart" aria-label="Consultas nos últimos 14 dias"></div>
           </article>
-          <article class="dashboard-card analytics-card">
-            <div class="panel-title-row"><div><span class="eyebrow">Comportamento</span><h2>Uso por horário</h2></div></div>
+          <article class="dashboard-card analytics-card hourly-card">
+            <div class="panel-title-row"><div><span class="eyebrow">Comportamento</span><h2>Uso por horário</h2><p>Faixas do dia com maior volume de consultas.</p></div><span class="analytics-card-mark" aria-hidden="true">24h</span></div>
             <div id="hourlyUsageChart" class="bar-chart compact" aria-label="Consultas por horário"></div>
           </article>
         </section>
 
         <section class="reports-analytics-grid">
-          <article class="dashboard-card analytics-card">
-            <div class="panel-title-row"><div><span class="eyebrow">Equipes</span><h2>Desempenho no mês</h2></div></div>
+          <article class="dashboard-card analytics-card ranking-card">
+            <div class="panel-title-row"><div><span class="eyebrow">Equipes</span><h2>Desempenho no mês</h2><p>Participação das equipes no uso da plataforma.</p></div></div>
             <div id="teamsRanking" class="report-list"></div>
           </article>
-          <article class="dashboard-card analytics-card">
-            <div class="panel-title-row"><div><span class="eyebrow">Interesse</span><h2>Clientes mais consultados</h2></div></div>
+          <article class="dashboard-card analytics-card ranking-card">
+            <div class="panel-title-row"><div><span class="eyebrow">Interesse da operação</span><h2>Clientes mais consultados</h2><p>Contas que mais mobilizaram a equipe no período.</p></div></div>
             <div id="topClients" class="report-list"></div>
           </article>
         </section>
 
-        <section class="dashboard-card reports-panel" aria-label="Ranking de usuários">
+        <section class="dashboard-card reports-panel reports-ranking-panel" aria-label="Ranking de usuários">
           <div class="panel-title-row">
             <div>
-              <span class="eyebrow">Ranking</span>
+              <span class="eyebrow">Ranking individual</span>
               <h2>Usuários que mais consultaram</h2>
+              <p>Visão detalhada da atividade e recorrência de cada usuário.</p>
             </div>
             <span id="reportsGeneratedAt" class="badge neutral">Atualizando</span>
           </div>

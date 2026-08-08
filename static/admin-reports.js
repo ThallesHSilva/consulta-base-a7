@@ -10,6 +10,7 @@ const dailyQueriesValue = document.querySelector("#dailyQueriesValue");
 const monthlyQueriesValue = document.querySelector("#monthlyQueriesValue");
 const uniqueClientsValue = document.querySelector("#uniqueClientsValue");
 const adoptionValue = document.querySelector("#adoptionValue");
+const adoptionSummaryCard = document.querySelector("#adoptionSummaryCard");
 const dailyTrendChart = document.querySelector("#dailyTrendChart");
 const hourlyUsageChart = document.querySelector("#hourlyUsageChart");
 const teamsRanking = document.querySelector("#teamsRanking");
@@ -174,6 +175,7 @@ function renderReport(data) {
   monthlyQueriesValue.textContent = formatNumber(summary.consultas_mensais);
   uniqueClientsValue.textContent = formatNumber(summary.clientes_unicos_mes);
   adoptionValue.textContent = `${Number(summary.adocao_mensal || 0).toLocaleString("pt-BR")}%`;
+  adoptionSummaryCard?.style.setProperty("--adoption-progress", `${Math.min(100, Math.max(0, Number(summary.adocao_mensal || 0)))}%`);
   reportsGeneratedAt.textContent = `Atualizado em ${formatDate(data.generated_at)}`;
   if (reportsScopeText) {
     let scopeMessage = "";

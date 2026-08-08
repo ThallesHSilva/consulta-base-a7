@@ -25,7 +25,48 @@ const dataUploadForm = document.querySelector("#dataUploadForm");
 const dataUploadButton = document.querySelector("#dataUploadButton");
 const dataUploadMessage = document.querySelector("#dataUploadMessage");
 const dataUploadSummary = document.querySelector("#dataUploadSummary");
+const brandingLogoForm = document.querySelector("#brandingLogoForm");
+const brandingLogoInput = document.querySelector("#brandingLogoInput");
+const brandingLogoButton = document.querySelector("#brandingLogoButton");
+const brandingLogoMessage = document.querySelector("#brandingLogoMessage");
+const brandingLogoPreview = document.querySelector("#brandingLogoPreview");
 const sidebarToggleAuth = document.querySelector("#sidebarToggle");
+const registerOrganization = document.querySelector("#registerOrganization");
+const toggleLoginPassword = document.querySelector("#toggleLoginPassword");
+
+if (registerOrganization) {
+  const organizationFromUrl = new URLSearchParams(window.location.search).get("empresa");
+  if (organizationFromUrl) {
+    registerOrganization.value = organizationFromUrl;
+    registerOrganization.readOnly = true;
+  }
+}
+
+const organizationBrandingSlug = new URLSearchParams(window.location.search).get("empresa")
+  || sessionStorage.getItem("organizationSlug")
+  || "";
+if (organizationBrandingSlug) {
+  sessionStorage.setItem("organizationSlug", organizationBrandingSlug);
+  document.querySelectorAll(".auth-logo").forEach((logo) => {
+    logo.src = `/api/branding/logo?empresa=${encodeURIComponent(organizationBrandingSlug)}`;
+    logo.alt = "Logo da empresa";
+  });
+  document.querySelectorAll("[data-preserve-company]").forEach((link) => {
+    const target = new URL(link.getAttribute("href"), window.location.origin);
+    target.searchParams.set("empresa", organizationBrandingSlug);
+    link.setAttribute("href", `${target.pathname}${target.search}`);
+  });
+}
+
+toggleLoginPassword?.addEventListener("click", () => {
+  const passwordInput = document.querySelector("#loginPassword");
+  if (!passwordInput) return;
+  const shouldShow = passwordInput.type === "password";
+  passwordInput.type = shouldShow ? "text" : "password";
+  toggleLoginPassword.textContent = shouldShow ? "Ocultar" : "Mostrar";
+  toggleLoginPassword.setAttribute("aria-label", shouldShow ? "Ocultar senha" : "Mostrar senha");
+  toggleLoginPassword.setAttribute("aria-pressed", shouldShow ? "true" : "false");
+});
 
 function showAuthMessage(message, type = "error", target = authMessage) {
   if (!target) return;
@@ -474,6 +515,45 @@ dataUploadForm?.addEventListener("submit", async (event) => {
   }
 });
 
+brandingLogoForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  hideAuthMessage(brandingLogoMessage);
+  const file = brandingLogoInput?.files?.[0];
+  if (!file) {
+    showAuthMessage("Selecione uma imagem para a logo.", "error", brandingLogoMessage);
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    showAuthMessage("A logo deve ter no máximo 5 MB.", "error", brandingLogoMessage);
+    return;
+  }
+
+  brandingLogoButton.disabled = true;
+  try {
+    const response = await fetch("/api/admin/branding/logo", {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream" },
+      body: file,
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || "Não foi possível atualizar a logo.");
+    }
+    const logoUrl = data.logo_url || `/api/branding/logo?v=${Date.now()}`;
+    if (brandingLogoPreview) brandingLogoPreview.src = logoUrl;
+    document.querySelectorAll(".brand-logo").forEach((logo) => {
+      logo.src = logoUrl;
+      logo.alt = "Logo da empresa";
+    });
+    brandingLogoForm.reset();
+    showAuthMessage(data.message, "success", brandingLogoMessage);
+  } catch (error) {
+    showAuthMessage(error.message || "Não foi possível atualizar a logo.", "error", brandingLogoMessage);
+  } finally {
+    brandingLogoButton.disabled = false;
+  }
+});
+
 loginForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   hideAuthMessage();
@@ -505,7 +585,11 @@ registerForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   hideAuthMessage();
   setSubmitLoading(registerForm, true);
+  if (registerOrganization?.value) {
+    sessionStorage.setItem("organizationSlug", registerOrganization.value);
+  }
   const { response, data } = await postJson("/api/auth/register", {
+    organization_slug: registerOrganization?.value || "",
     nome_completo: document.querySelector("#registerName").value,
     email: document.querySelector("#registerEmail").value,
     senha: document.querySelector("#registerPassword").value,

@@ -4,6 +4,7 @@
   const userInitials = document.querySelector("#currentUserInitials");
   const adminNavItem = document.querySelector("#adminNavItem");
   const adminReportsNavItem = document.querySelector("#adminReportsNavItem");
+  const sidebarNav = document.querySelector(".sidebar-nav");
   const logoutButton = document.querySelector("#logoutButton");
 
   function initials(name) {
@@ -57,10 +58,26 @@
       SUPERVISOR: "Supervisor",
       USUARIO: "Usuário",
     };
-    if (userRole) userRole.textContent = roleLabels[user.perfil] || user.perfil || "Perfil";
+    if (userRole) {
+      const role = roleLabels[user.perfil] || user.perfil || "Perfil";
+      userRole.textContent = user.organization_name ? `${role} · ${user.organization_name}` : role;
+    }
     if (userInitials) userInitials.textContent = initials(user.nome_completo);
+    document.querySelectorAll(".brand-logo").forEach((logo) => {
+      logo.src = `/api/branding/logo?v=${Date.now()}`;
+      logo.alt = user.organization_name ? `Logo ${user.organization_name}` : "Logo da empresa";
+    });
     if (adminNavItem) adminNavItem.hidden = user.perfil !== "ADMIN";
     if (adminReportsNavItem) adminReportsNavItem.hidden = !["ADMIN", "GESTOR", "SUPERVISOR"].includes(user.perfil);
+    if (sidebarNav && user.is_platform_admin && !document.querySelector("#platformOrganizationsNavItem")) {
+      const link = document.createElement("a");
+      link.id = "platformOrganizationsNavItem";
+      link.className = "nav-item";
+      link.href = "/admin/empresas";
+      link.title = "Empresas";
+      link.innerHTML = "<span aria-hidden=\"true\">▦</span><span>Empresas</span>";
+      sidebarNav.appendChild(link);
+    }
     window.setInterval(verifyActiveSession, 30_000);
   } catch (error) {
     window.location.href = "/login";

@@ -16,7 +16,7 @@
     <div class="app-layout">
       <aside class="sidebar" aria-label="Navegação principal">
         <div class="sidebar-brand">
-          <img class="brand-logo" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+          <img class="brand-logo" src="/api/branding/logo" alt="Logo da empresa" />
         </div>
 
         <nav class="sidebar-nav">
@@ -91,6 +91,30 @@
             <p>Gerencie aprovações, bloqueios e cadastros de usuários.</p>
           </div>
         </header>
+
+        <section class="dashboard-card branding-panel" aria-label="Identidade visual da empresa">
+          <div class="panel-title-row">
+            <div>
+              <span class="eyebrow">Identidade visual</span>
+              <h2>Logo da empresa</h2>
+            </div>
+            <span class="badge neutral">PNG, JPG ou WebP</span>
+          </div>
+          <div class="branding-editor">
+            <div class="branding-preview">
+              <img id="brandingLogoPreview" src="/api/branding/logo" alt="Logo atual da empresa" />
+            </div>
+            <form id="brandingLogoForm" class="auth-form">
+              <label>
+                <span>Nova logo</span>
+                <input id="brandingLogoInput" type="file" accept="image/png,image/jpeg,image/webp" required />
+              </label>
+              <small>Use uma imagem de até 5 MB. A logo será exibida automaticamente para toda a equipe.</small>
+              <button id="brandingLogoButton" class="gradient-button" type="submit">Atualizar logo</button>
+              <p id="brandingLogoMessage" class="auth-message" aria-live="polite" hidden></p>
+            </form>
+          </div>
+        </section>
 
         <section class="dashboard-card data-upload-panel" aria-label="Atualização de bases CSV">
           <div class="panel-title-row">

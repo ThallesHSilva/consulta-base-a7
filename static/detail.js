@@ -1,4 +1,8 @@
 const detailTitle = document.querySelector("#detailTitle");
+const detailEyebrow = document.querySelector("#detailEyebrow");
+const detailContentKicker = document.querySelector("#detailContentKicker");
+const detailContentTitle = document.querySelector("#detailContentTitle");
+const detailItemCount = document.querySelector("#detailItemCount");
 const detailCompanyName = document.querySelector("#detailCompanyName");
 const detailCnpj = document.querySelector("#detailCnpj");
 const detailContent = document.querySelector("#detailContent");
@@ -29,11 +33,19 @@ function formatCurrency(value) {
 function setPageTitle() {
   if (detailType === "mobile") {
     detailTitle.textContent = "Detalhamento móvel";
+    detailEyebrow.textContent = "Portfólio móvel";
+    detailContentKicker.textContent = "Linhas e planos";
+    detailContentTitle.textContent = "Linhas móveis e ofertas";
+    document.title = "Detalhamento móvel";
     return;
   }
 
   if (detailType === "broadband") {
-    detailTitle.textContent = "Detalhamento BL";
+    detailTitle.textContent = "Detalhamento fixa";
+    detailEyebrow.textContent = "Portfólio fixa";
+    detailContentKicker.textContent = "Contas e produtos";
+    detailContentTitle.textContent = "Serviços fixos e oportunidades";
+    document.title = "Detalhamento fixa";
     return;
   }
 
@@ -76,6 +88,7 @@ function createMobileOfferTable(offers) {
 
 function renderMobile(items) {
   detailContent.innerHTML = "";
+  detailItemCount.textContent = `${items.length} ${items.length === 1 ? "linha" : "linhas"}`;
   if (!items.length) {
     renderEmpty("Nenhuma linha móvel encontrada para este CNPJ.");
     return;
@@ -306,6 +319,7 @@ function createOffersToggle(offers, panel) {
 
 function renderBroadband(items) {
   detailContent.innerHTML = "";
+  detailItemCount.textContent = `${items.length} ${items.length === 1 ? "conta" : "contas"}`;
   if (!items.length) {
     renderEmpty("Nenhuma BL encontrada para este CNPJ.");
     return;

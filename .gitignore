@@ -12,3 +12,4 @@ __pycache__/
 
 # Bases operacionais são carregadas pelo painel administrativo.
 data/*.csv
+data/organizations/
