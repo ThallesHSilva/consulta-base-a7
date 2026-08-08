@@ -8,10 +8,12 @@ import json
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import smtplib
 import time
 import textwrap
+import threading
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
@@ -34,6 +36,7 @@ CACHE_DIR = ROOT / ".cache"
 DB_PATH = CACHE_DIR / "consulta_base.sqlite3"
 AUTH_DB_PATH = CACHE_DIR / "auth.sqlite3"
 STATIC_DIR = ROOT / "static"
+DEFAULT_ORGANIZATION_SLUG = os.environ.get("DEFAULT_ORGANIZATION_SLUG", "a7-connect").strip().lower() or "a7-connect"
 SEARCH_LIMIT = 500
 SESSION_COOKIE = "consulta_base_session"
 SESSION_DURATION_HOURS = 2
@@ -58,6 +61,7 @@ GENERIC_VERIFICATION_MESSAGE = (
 )
 DB_TIMEOUT_SECONDS = 30
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(300 * 1024 * 1024)))
+MAX_LOGO_UPLOAD_BYTES = int(os.environ.get("MAX_LOGO_UPLOAD_BYTES", str(5 * 1024 * 1024)))
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 APP_TIMEZONE = os.environ.get("APP_TIMEZONE", "America/Sao_Paulo")
 SESSION_COOKIE_SECURE_MODE = os.environ.get("SESSION_COOKIE_SECURE", "auto").strip().lower() or "auto"
@@ -111,6 +115,68 @@ APP_STATE: dict[str, Any] = {
     "sources": [],
     "message": "Base ainda nao inicializada.",
 }
+APP_STATES: dict[int, dict[str, Any]] = {}
+DATA_LOCKS: dict[int, threading.RLock] = {}
+
+
+def organization_data_lock(organization_id: int | None) -> threading.RLock:
+    key = int(organization_id or 1)
+    lock = DATA_LOCKS.get(key)
+    if lock is None:
+        lock = threading.RLock()
+        DATA_LOCKS[key] = lock
+    return lock
+
+
+def normalize_organization_slug(value: Any) -> str:
+    slug = clean_cell(value).lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
+    return slug[:60]
+
+
+def organization_data_dir(organization_id: int | None) -> Path:
+    if organization_id in (None, 1):
+        return DATA_DIR
+    return DATA_DIR / "organizations" / str(int(organization_id))
+
+
+def organization_db_path(organization_id: int | None) -> Path:
+    if organization_id in (None, 1):
+        return DB_PATH
+    return CACHE_DIR / "organizations" / str(int(organization_id)) / "consulta_base.sqlite3"
+
+
+def organization_data_files(organization_id: int | None) -> list[dict[str, Any]]:
+    if organization_id in (None, 1):
+        return DATA_FILES
+    data_dir = organization_data_dir(organization_id)
+    return [
+        {**item, "path": data_dir / item["path"].name}
+        for item in DATA_FILES
+    ]
+
+
+def organization_data_file_by_key(organization_id: int | None) -> dict[str, dict[str, Any]]:
+    return {item["key"]: item for item in organization_data_files(organization_id)}
+
+
+def organization_branding_dir(organization_id: int | None) -> Path:
+    return organization_data_dir(organization_id) / "branding"
+
+
+def detect_logo_image(content: bytes, declared_content_type: Any = "") -> tuple[str, str]:
+    declared = clean_cell(declared_content_type).split(";", 1)[0].lower()
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        detected = ("image/png", ".png")
+    elif content.startswith(b"\xff\xd8\xff"):
+        detected = ("image/jpeg", ".jpg")
+    elif len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        detected = ("image/webp", ".webp")
+    else:
+        raise ValueError("Envie uma logo válida em PNG, JPG ou WebP.")
+    if declared and declared not in {detected[0], "application/octet-stream"}:
+        raise ValueError("O formato informado não corresponde ao conteúdo da imagem.")
+    return detected
 
 
 def utc_now() -> datetime:
@@ -243,6 +309,10 @@ def public_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         "equipe_nome": row["equipe_nome"] if "equipe_nome" in row.keys() else "",
         "gestor_id": row["gestor_id"] if "gestor_id" in row.keys() else None,
         "gestor_nome": row["gestor_nome"] if "gestor_nome" in row.keys() else "",
+        "organization_id": row["organization_id"] if "organization_id" in row.keys() else 1,
+        "organization_name": row["organization_name"] if "organization_name" in row.keys() else "",
+        "organization_slug": row["organization_slug"] if "organization_slug" in row.keys() else "",
+        "is_platform_admin": bool(row["is_platform_admin"]) if "is_platform_admin" in row.keys() else False,
     }
 
 
@@ -522,13 +592,16 @@ def parse_multipart_form(content_type: str, body: bytes) -> list[dict[str, Any]]
 def save_uploaded_data_files(
     parts: list[dict[str, Any]],
     refresh_after_upload: bool = True,
+    organization_id: int | None = None,
+    uploaded_by: int | None = None,
 ) -> tuple[HTTPStatus, dict[str, Any]]:
+    data_file_by_key = organization_data_file_by_key(organization_id)
     selected_parts: dict[str, dict[str, Any]] = {}
     unknown_fields: list[str] = []
 
     for part in parts:
         key = part["name"]
-        if key not in DATA_FILE_BY_KEY:
+        if key not in data_file_by_key:
             unknown_fields.append(key)
             continue
         selected_parts[key] = part
@@ -550,7 +623,7 @@ def save_uploaded_data_files(
 
     upload_plan = []
     for key, part in selected_parts.items():
-        data_file = DATA_FILE_BY_KEY[key]
+        data_file = data_file_by_key[key]
         content = part["content"]
         try:
             validate_uploaded_csv_headers(content, data_file)
@@ -574,7 +647,7 @@ def save_uploaded_data_files(
             }
         )
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    organization_data_dir(organization_id).mkdir(parents=True, exist_ok=True)
     temp_paths: list[Path] = []
     uploaded = []
     try:
@@ -586,6 +659,19 @@ def save_uploaded_data_files(
             item["temp_path"] = temp_path
 
         for item in upload_plan:
+            if item["target"].is_file():
+                version_dir = (
+                    organization_data_dir(organization_id)
+                    / ".versions"
+                    / item["key"]
+                )
+                version_dir.mkdir(parents=True, exist_ok=True)
+                version_name = (
+                    utc_now().strftime("%Y%m%dT%H%M%S%fZ")
+                    + "-"
+                    + item["target"].name
+                )
+                shutil.copy2(item["target"], version_dir / version_name)
             os.replace(item["temp_path"], item["target"])
             uploaded.append(
                 {
@@ -601,8 +687,32 @@ def save_uploaded_data_files(
             if temp_path.exists():
                 temp_path.unlink()
 
+    if organization_id is not None:
+        with open_auth_db() as conn:
+            conn.executemany(
+                """
+                INSERT INTO data_uploads (
+                    organization_id, source_key, original_name, stored_name,
+                    size, uploaded_by, data_upload
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        int(organization_id),
+                        item["key"],
+                        item["filename"],
+                        relative_display(item["target"]),
+                        item["size"],
+                        uploaded_by,
+                        utc_iso(),
+                    )
+                    for item in upload_plan
+                ],
+            )
+            conn.commit()
+
     if not refresh_after_upload:
-        pending_files = missing_files()
+        pending_files = missing_files(organization_data_files(organization_id))
         return (
             HTTPStatus.OK,
             {
@@ -622,7 +732,7 @@ def save_uploaded_data_files(
             },
         )
 
-    state = refresh_data(force_rebuild=True)
+    state = refresh_data(force_rebuild=True, organization_id=organization_id)
     missing = state.get("missing_files", [])
     return (
         HTTPStatus.OK,
@@ -644,9 +754,9 @@ def save_uploaded_data_files(
     )
 
 
-def file_signature() -> list[dict[str, Any]]:
+def file_signature(data_files: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     signature = []
-    for data_file in DATA_FILES:
+    for data_file in data_files or DATA_FILES:
         path = data_file["path"]
         item = {"path": relative_display(path), "exists": path.is_file()}
         if path.is_file():
@@ -656,25 +766,30 @@ def file_signature() -> list[dict[str, Any]]:
     return signature
 
 
-def missing_files() -> list[str]:
+def missing_files(data_files: list[dict[str, Any]] | None = None) -> list[str]:
     return [
         relative_display(data_file["path"])
-        for data_file in DATA_FILES
+        for data_file in data_files or DATA_FILES
         if data_file.get("required", True) and not data_file["path"].is_file()
     ]
 
 
-def database_is_current() -> bool:
-    if not DB_PATH.is_file():
+def database_is_current(
+    db_path: Path | None = None,
+    data_files: list[dict[str, Any]] | None = None,
+) -> bool:
+    target_db_path = db_path or DB_PATH
+    selected_data_files = data_files or DATA_FILES
+    if not target_db_path.is_file():
         return False
     try:
-        with closing(sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS)) as conn:
+        with closing(sqlite3.connect(target_db_path, timeout=DB_TIMEOUT_SECONDS)) as conn:
             row = conn.execute(
                 "SELECT value FROM metadata WHERE key = 'file_signature'"
             ).fetchone()
             if not row:
                 return False
-            return json.loads(row[0]) == file_signature()
+            return json.loads(row[0]) == file_signature(selected_data_files)
     except (sqlite3.Error, json.JSONDecodeError, OSError):
         return False
 
@@ -685,6 +800,7 @@ def open_auth_db() -> Iterator[sqlite3.Connection]:
     conn = sqlite3.connect(AUTH_DB_PATH, timeout=DB_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
     conn.execute(f"PRAGMA busy_timeout = {DB_TIMEOUT_SECONDS * 1000}")
+    conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
     finally:
@@ -695,10 +811,26 @@ def initialize_auth_database() -> None:
     with open_auth_db() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS organizations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT NOT NULL,
+                slug TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                status TEXT NOT NULL DEFAULT 'ATIVA',
+                data_criacao TEXT NOT NULL,
+                criado_por INTEGER,
+                logo_filename TEXT,
+                logo_content_type TEXT,
+                logo_atualizada_em TEXT,
+                logo_atualizada_por INTEGER
+            );
+
             CREATE TABLE IF NOT EXISTS equipes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nome TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                data_criacao TEXT NOT NULL
+                nome TEXT NOT NULL COLLATE NOCASE,
+                data_criacao TEXT NOT NULL,
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id),
+                UNIQUE (organization_id, nome)
             );
 
             CREATE TABLE IF NOT EXISTS users (
@@ -717,9 +849,12 @@ def initialize_auth_database() -> None:
                 ultimo_login TEXT,
                 equipe_id INTEGER,
                 gestor_id INTEGER,
+                organization_id INTEGER NOT NULL DEFAULT 1,
+                is_platform_admin INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (aprovado_por) REFERENCES users(id),
                 FOREIGN KEY (equipe_id) REFERENCES equipes(id),
-                FOREIGN KEY (gestor_id) REFERENCES users(id)
+                FOREIGN KEY (gestor_id) REFERENCES users(id),
+                FOREIGN KEY (organization_id) REFERENCES organizations(id)
             );
 
             CREATE TABLE IF NOT EXISTS sessions (
@@ -787,6 +922,7 @@ def initialize_auth_database() -> None:
                 company_name TEXT,
                 data_consulta TEXT NOT NULL,
                 total INTEGER NOT NULL DEFAULT 0,
+                organization_id INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
 
@@ -798,7 +934,21 @@ def initialize_auth_database() -> None:
                 company_name TEXT,
                 data_consulta TEXT NOT NULL,
                 total INTEGER NOT NULL DEFAULT 0,
+                organization_id INTEGER NOT NULL DEFAULT 1,
                 FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS data_uploads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                organization_id INTEGER NOT NULL,
+                source_key TEXT NOT NULL,
+                original_name TEXT NOT NULL,
+                stored_name TEXT NOT NULL,
+                size INTEGER NOT NULL,
+                uploaded_by INTEGER,
+                data_upload TEXT NOT NULL,
+                FOREIGN KEY (organization_id) REFERENCES organizations(id),
+                FOREIGN KEY (uploaded_by) REFERENCES users(id)
             );
 
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -821,8 +971,34 @@ def initialize_auth_database() -> None:
                 ON search_events(user_id, data_consulta);
             CREATE INDEX IF NOT EXISTS idx_search_events_date
                 ON search_events(data_consulta);
+            CREATE INDEX IF NOT EXISTS idx_uploads_organization_date
+                ON data_uploads(organization_id, data_upload);
             """
         )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO organizations (id, nome, slug, status, data_criacao)
+            VALUES (1, ?, ?, 'ATIVA', ?)
+            """,
+            (
+                clean_cell(os.environ.get("DEFAULT_ORGANIZATION_NAME")) or "A7 Connect",
+                DEFAULT_ORGANIZATION_SLUG,
+                utc_iso(),
+            ),
+        )
+        organization_columns = {
+            row["name"] for row in conn.execute("PRAGMA table_info(organizations)")
+        }
+        for column_name, column_type in (
+            ("logo_filename", "TEXT"),
+            ("logo_content_type", "TEXT"),
+            ("logo_atualizada_em", "TEXT"),
+            ("logo_atualizada_por", "INTEGER"),
+        ):
+            if column_name not in organization_columns:
+                conn.execute(
+                    f"ALTER TABLE organizations ADD COLUMN {column_name} {column_type}"
+                )
         user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
         if "email_confirmado_em" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN email_confirmado_em TEXT")
@@ -837,11 +1013,44 @@ def initialize_auth_database() -> None:
             conn.execute("ALTER TABLE users ADD COLUMN equipe_id INTEGER REFERENCES equipes(id)")
         if "gestor_id" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN gestor_id INTEGER REFERENCES users(id)")
+        if "organization_id" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN organization_id INTEGER NOT NULL DEFAULT 1")
+        if "is_platform_admin" not in user_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN is_platform_admin INTEGER NOT NULL DEFAULT 0")
+        team_columns = {row["name"] for row in conn.execute("PRAGMA table_info(equipes)")}
+        if "organization_id" not in team_columns:
+            conn.execute("ALTER TABLE equipes ADD COLUMN organization_id INTEGER NOT NULL DEFAULT 1")
+        for table_name in ("search_history", "search_events"):
+            columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table_name})")}
+            if "organization_id" not in columns:
+                conn.execute(
+                    f"ALTER TABLE {table_name} ADD COLUMN organization_id INTEGER NOT NULL DEFAULT 1"
+                )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_equipe ON users(equipe_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_gestor ON users(gestor_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_organization ON users(organization_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_equipes_organization ON equipes(organization_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_search_events_organization_date ON search_events(organization_id, data_consulta)")
+        conn.execute("UPDATE users SET organization_id = 1 WHERE organization_id IS NULL")
+        conn.execute("UPDATE equipes SET organization_id = 1 WHERE organization_id IS NULL")
+        conn.execute("UPDATE search_history SET organization_id = 1 WHERE organization_id IS NULL")
+        conn.execute("UPDATE search_events SET organization_id = 1 WHERE organization_id IS NULL")
         conn.commit()
         backfill_search_events(conn)
         ensure_initial_admin(conn)
+        platform_admin_count = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE is_platform_admin = 1"
+        ).fetchone()[0]
+        if not platform_admin_count:
+            first_admin = conn.execute(
+                "SELECT id FROM users WHERE perfil = 'ADMIN' ORDER BY id LIMIT 1"
+            ).fetchone()
+            if first_admin:
+                conn.execute(
+                    "UPDATE users SET is_platform_admin = 1 WHERE id = ?",
+                    (first_admin["id"],),
+                )
+                conn.commit()
 
 
 def backfill_search_events(conn: sqlite3.Connection) -> None:
@@ -875,8 +1084,8 @@ def ensure_initial_admin(conn: sqlite3.Connection) -> None:
         """
         INSERT INTO users (
             nome_completo, email, email_confirmado_em, senha_hash, perfil, status, data_criacao,
-            data_aprovacao, aprovado_por
-        ) VALUES (?, ?, ?, ?, 'ADMIN', 'ATIVO', ?, ?, NULL)
+            data_aprovacao, aprovado_por, organization_id, is_platform_admin
+        ) VALUES (?, ?, ?, ?, 'ADMIN', 'ATIVO', ?, ?, NULL, 1, 1)
         """,
         (name, email, now, hash_password(password), now, now),
     )
@@ -940,9 +1149,14 @@ def create_schema(conn: sqlite3.Connection) -> None:
     )
 
 
-def rebuild_database() -> None:
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    temp_path = DB_PATH.with_suffix(".tmp")
+def rebuild_database(
+    db_path: Path | None = None,
+    data_files: list[dict[str, Any]] | None = None,
+) -> None:
+    target_db_path = db_path or DB_PATH
+    selected_data_files = data_files or DATA_FILES
+    target_db_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target_db_path.with_suffix(".tmp")
     if temp_path.exists():
         temp_path.unlink()
 
@@ -952,7 +1166,7 @@ def rebuild_database() -> None:
         conn.execute("PRAGMA synchronous = OFF")
         create_schema(conn)
 
-        for data_file in DATA_FILES:
+        for data_file in selected_data_files:
             source_key = data_file["key"]
             source_label = data_file["label"]
             path = data_file["path"]
@@ -1041,17 +1255,18 @@ def rebuild_database() -> None:
         )
         conn.execute(
             "INSERT INTO metadata (key, value) VALUES ('file_signature', ?)",
-            (json.dumps(file_signature(), ensure_ascii=False, sort_keys=True),),
+            (json.dumps(file_signature(selected_data_files), ensure_ascii=False, sort_keys=True),),
         )
         conn.commit()
     finally:
         conn.close()
 
-    os.replace(temp_path, DB_PATH)
+    os.replace(temp_path, target_db_path)
 
 
-def load_sources() -> list[dict[str, Any]]:
-    with closing(sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS)) as conn:
+def load_sources(db_path: Path | None = None) -> list[dict[str, Any]]:
+    target_db_path = db_path or DB_PATH
+    with closing(sqlite3.connect(target_db_path, timeout=DB_TIMEOUT_SECONDS)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
@@ -1543,7 +1758,11 @@ def load_broadband_detail(conn: sqlite3.Connection, key: str) -> list[dict[str, 
     return detail
 
 
-def query_detail(value: str, detail_type: str) -> dict[str, Any]:
+def query_detail(
+    value: str,
+    detail_type: str,
+    db_path: Path | None = None,
+) -> dict[str, Any]:
     key = cnpj_key(value)
     if not key:
         return {
@@ -1556,7 +1775,8 @@ def query_detail(value: str, detail_type: str) -> dict[str, Any]:
             "message": "Informe um CNPJ valido.",
         }
 
-    with closing(sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS)) as conn:
+    target_db_path = db_path or DB_PATH
+    with closing(sqlite3.connect(target_db_path, timeout=DB_TIMEOUT_SECONDS)) as conn:
         conn.row_factory = sqlite3.Row
         company_name = load_company_name(conn, key)
         if detail_type == "mobile":
@@ -1584,9 +1804,15 @@ def query_detail(value: str, detail_type: str) -> dict[str, Any]:
     }
 
 
-def initialize_data(force_rebuild: bool = False) -> dict[str, Any]:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    missing = missing_files()
+def initialize_data(
+    force_rebuild: bool = False,
+    organization_id: int | None = None,
+) -> dict[str, Any]:
+    data_dir = organization_data_dir(organization_id)
+    data_files = organization_data_files(organization_id)
+    db_path = organization_db_path(organization_id)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    missing = missing_files(data_files)
     if missing:
         names = ", ".join(missing)
         prefix = "Arquivo ausente" if len(missing) == 1 else "Arquivos ausentes"
@@ -1597,10 +1823,10 @@ def initialize_data(force_rebuild: bool = False) -> dict[str, Any]:
             "message": f"{prefix}: {names}",
         }
 
-    if force_rebuild or not database_is_current():
-        rebuild_database()
+    if force_rebuild or not database_is_current(db_path, data_files):
+        rebuild_database(db_path, data_files)
 
-    sources = load_sources()
+    sources = load_sources(db_path)
     return {
         "ready": True,
         "missing_files": [],
@@ -1609,13 +1835,32 @@ def initialize_data(force_rebuild: bool = False) -> dict[str, Any]:
     }
 
 
-def refresh_data(force_rebuild: bool = True) -> dict[str, Any]:
+def refresh_data(
+    force_rebuild: bool = True,
+    organization_id: int | None = None,
+) -> dict[str, Any]:
     global APP_STATE
-    APP_STATE = initialize_data(force_rebuild=force_rebuild)
-    return APP_STATE
+    state = initialize_data(
+        force_rebuild=force_rebuild,
+        organization_id=organization_id,
+    )
+    if organization_id in (None, 1):
+        APP_STATE = state
+    if organization_id is not None:
+        APP_STATES[int(organization_id)] = state
+    return state
 
 
-def query_cnpj(value: str) -> dict[str, Any]:
+def get_organization_state(organization_id: int) -> dict[str, Any]:
+    organization_id = int(organization_id)
+    with organization_data_lock(organization_id):
+        state = APP_STATES.get(organization_id)
+        if state is None:
+            state = refresh_data(force_rebuild=False, organization_id=organization_id)
+        return state
+
+
+def query_cnpj(value: str, db_path: Path | None = None) -> dict[str, Any]:
     key = cnpj_key(value)
     if not key:
         return {
@@ -1648,7 +1893,8 @@ def query_cnpj(value: str) -> dict[str, Any]:
             "message": "Informe um CNPJ valido.",
         }
 
-    with closing(sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS)) as conn:
+    target_db_path = db_path or DB_PATH
+    with closing(sqlite3.connect(target_db_path, timeout=DB_TIMEOUT_SECONDS)) as conn:
         conn.row_factory = sqlite3.Row
         metrics = load_cnpj_metrics(conn, key)
         company_name = load_company_name(conn, key)
@@ -1782,8 +2028,11 @@ def build_simple_pdf(lines: list[str], title: str = "Consulta Base A7 Connect") 
     return bytes(output)
 
 
-def build_cnpj_pdf(value: str) -> tuple[HTTPStatus, bytes | dict[str, Any], str]:
-    data = query_cnpj(value)
+def build_cnpj_pdf(
+    value: str,
+    db_path: Path | None = None,
+) -> tuple[HTTPStatus, bytes | dict[str, Any], str]:
+    data = query_cnpj(value) if db_path is None else query_cnpj(value, db_path=db_path)
     if not data.get("total"):
         return HTTPStatus.NOT_FOUND, {"ok": False, "message": data.get("message") or "CNPJ não localizado."}, ""
 
@@ -1840,6 +2089,248 @@ def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> sqlite3.Row | No
     ).fetchone()
 
 
+def fetch_organization_by_slug(
+    conn: sqlite3.Connection,
+    slug: Any,
+) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM organizations WHERE slug = ?",
+        (normalize_organization_slug(slug),),
+    ).fetchone()
+
+
+def organization_logo(
+    organization_id: int,
+) -> tuple[Path, str] | None:
+    with open_auth_db() as conn:
+        organization = conn.execute(
+            """
+            SELECT logo_filename, logo_content_type
+            FROM organizations
+            WHERE id = ? AND status = 'ATIVA'
+            """,
+            (int(organization_id),),
+        ).fetchone()
+    if not organization or not organization["logo_filename"]:
+        return None
+    filename = Path(organization["logo_filename"]).name
+    path = organization_branding_dir(organization_id) / filename
+    if not path.is_file():
+        return None
+    return path, organization["logo_content_type"] or "application/octet-stream"
+
+
+def save_organization_logo(
+    organization_id: int,
+    uploaded_by: int,
+    content: bytes,
+    declared_content_type: Any = "",
+) -> tuple[HTTPStatus, dict[str, Any]]:
+    if not content:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Selecione uma imagem para a logo."}
+    if len(content) > MAX_LOGO_UPLOAD_BYTES:
+        limit_mb = MAX_LOGO_UPLOAD_BYTES // (1024 * 1024)
+        return HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {
+            "ok": False,
+            "message": f"A logo excede o limite de {limit_mb} MB.",
+        }
+    try:
+        content_type, extension = detect_logo_image(content, declared_content_type)
+    except ValueError as error:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": str(error)}
+
+    with open_auth_db() as conn:
+        authorized = conn.execute(
+            """
+            SELECT organizations.id
+            FROM organizations
+            JOIN users ON users.id = ?
+            WHERE organizations.id = ?
+              AND organizations.status = 'ATIVA'
+              AND users.organization_id = organizations.id
+              AND users.status = 'ATIVO'
+              AND users.perfil = 'ADMIN'
+            """,
+            (uploaded_by, int(organization_id)),
+        ).fetchone()
+    if not authorized:
+        return HTTPStatus.FORBIDDEN, {
+            "ok": False,
+            "message": "Você não pode alterar a identidade visual desta empresa.",
+        }
+
+    branding_dir = organization_branding_dir(organization_id)
+    branding_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"logo{extension}"
+    target = branding_dir / filename
+    temp_path = branding_dir / f".{filename}.{secrets.token_hex(8)}.tmp"
+    try:
+        temp_path.write_bytes(content)
+        os.replace(temp_path, target)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+    now = utc_iso()
+    with open_auth_db() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE organizations
+            SET logo_filename = ?, logo_content_type = ?,
+                logo_atualizada_em = ?, logo_atualizada_por = ?
+            WHERE id = ? AND status = 'ATIVA'
+            """,
+            (filename, content_type, now, uploaded_by, int(organization_id)),
+        )
+        if not cursor.rowcount:
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Empresa não encontrada ou bloqueada."}
+        conn.commit()
+    return HTTPStatus.OK, {
+        "ok": True,
+        "message": "Logo da empresa atualizada com sucesso.",
+        "logo_url": f"/api/branding/logo?v={time.time_ns()}",
+        "content_type": content_type,
+    }
+
+
+def list_organizations() -> list[dict[str, Any]]:
+    with open_auth_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT organizations.*,
+                   COUNT(DISTINCT users.id) AS total_usuarios,
+                   COUNT(DISTINCT CASE WHEN users.status = 'ATIVO' THEN users.id END) AS usuarios_ativos,
+                   MAX(data_uploads.data_upload) AS ultimo_upload
+            FROM organizations
+            LEFT JOIN users ON users.organization_id = organizations.id
+            LEFT JOIN data_uploads ON data_uploads.organization_id = organizations.id
+            GROUP BY organizations.id
+            ORDER BY organizations.nome COLLATE NOCASE
+            """
+        ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "nome": row["nome"],
+            "slug": row["slug"],
+            "status": row["status"],
+            "data_criacao": row["data_criacao"],
+            "total_usuarios": row["total_usuarios"],
+            "usuarios_ativos": row["usuarios_ativos"] or 0,
+            "ultimo_upload": row["ultimo_upload"] or "",
+            "has_logo": bool(row["logo_filename"]),
+            "registration_url": f"/cadastro?empresa={row['slug']}",
+            "login_url": f"/login?empresa={row['slug']}",
+        }
+        for row in rows
+    ]
+
+
+def create_organization(
+    platform_user: dict[str, Any],
+    data: dict[str, Any],
+) -> tuple[HTTPStatus, dict[str, Any]]:
+    if not platform_user.get("is_platform_admin"):
+        return HTTPStatus.FORBIDDEN, {"ok": False, "message": "Acesso restrito ao administrador da plataforma."}
+
+    name = clean_cell(data.get("nome"))
+    slug = normalize_organization_slug(data.get("slug") or name)
+    admin_name = clean_cell(data.get("admin_nome"))
+    admin_email = normalize_email(data.get("admin_email"))
+    admin_password = str(data.get("admin_senha") or "")
+    if len(name) < 2 or len(name) > 120:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Informe o nome da empresa entre 2 e 120 caracteres."}
+    if len(slug) < 2:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Informe um código de empresa válido."}
+    if not admin_name:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Informe o nome do administrador da empresa."}
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", admin_email):
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Informe um e-mail válido para o administrador."}
+    password_error = validate_password_strength(admin_password)
+    if password_error:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": password_error}
+
+    now = utc_iso()
+    with open_auth_db() as conn:
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO organizations (nome, slug, status, data_criacao, criado_por)
+                VALUES (?, ?, 'ATIVA', ?, ?)
+                """,
+                (name, slug, now, platform_user["id"]),
+            )
+            organization_id = int(cursor.lastrowid)
+            user_cursor = conn.execute(
+                """
+                INSERT INTO users (
+                    nome_completo, email, email_confirmado_em, senha_hash, perfil, status,
+                    data_criacao, data_aprovacao, aprovado_por, organization_id
+                ) VALUES (?, ?, ?, ?, 'ADMIN', 'ATIVO', ?, ?, ?, ?)
+                """,
+                (
+                    admin_name,
+                    admin_email,
+                    now,
+                    hash_password(admin_password),
+                    now,
+                    now,
+                    platform_user["id"],
+                    organization_id,
+                ),
+            )
+            conn.commit()
+        except sqlite3.IntegrityError as error:
+            message = "O código da empresa ou o e-mail do administrador já está em uso."
+            print(f"Falha de integridade ao criar empresa: {error}")
+            return HTTPStatus.CONFLICT, {"ok": False, "message": message}
+
+    APP_STATES.pop(organization_id, None)
+    return HTTPStatus.CREATED, {
+        "ok": True,
+        "message": "Empresa e administrador criados com sucesso.",
+        "organization": {
+            "id": organization_id,
+            "nome": name,
+            "slug": slug,
+            "status": "ATIVA",
+            "registration_url": f"/cadastro?empresa={slug}",
+        },
+        "admin": {"id": user_cursor.lastrowid, "nome_completo": admin_name, "email": admin_email},
+    }
+
+
+def update_organization_status(
+    platform_user: dict[str, Any],
+    organization_id: int,
+    status: Any,
+) -> tuple[HTTPStatus, dict[str, Any]]:
+    if not platform_user.get("is_platform_admin"):
+        return HTTPStatus.FORBIDDEN, {"ok": False, "message": "Acesso restrito ao administrador da plataforma."}
+    normalized_status = clean_cell(status).upper()
+    if normalized_status not in {"ATIVA", "BLOQUEADA"}:
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Status de empresa inválido."}
+    if organization_id == platform_user.get("organization_id") and normalized_status == "BLOQUEADA":
+        return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Não é possível bloquear a empresa da sua própria sessão."}
+    with open_auth_db() as conn:
+        cursor = conn.execute(
+            "UPDATE organizations SET status = ? WHERE id = ?",
+            (normalized_status, organization_id),
+        )
+        if not cursor.rowcount:
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Empresa não encontrada."}
+        if normalized_status == "BLOQUEADA":
+            conn.execute(
+                """
+                UPDATE sessions SET ativo = 0
+                WHERE user_id IN (SELECT id FROM users WHERE organization_id = ?)
+                """,
+                (organization_id,),
+            )
+        conn.commit()
+    return HTTPStatus.OK, {"ok": True, "message": "Status da empresa atualizado com sucesso."}
+
+
 def create_pending_user(
     data: dict[str, Any],
     ip: str,
@@ -1850,6 +2341,9 @@ def create_pending_user(
     email = normalize_email(data.get("email"))
     password = str(data.get("senha") or "")
     confirmation = str(data.get("senha_confirmacao") or "")
+    organization_slug = normalize_organization_slug(
+        data.get("organization_slug") or data.get("empresa") or DEFAULT_ORGANIZATION_SLUG
+    )
 
     if not name:
         return False, "Informe o nome completo."
@@ -1864,13 +2358,17 @@ def create_pending_user(
 
     try:
         with open_auth_db() as conn:
+            organization = fetch_organization_by_slug(conn, organization_slug)
+            if not organization or organization["status"] != "ATIVA":
+                return False, "Empresa não encontrada ou indisponível. Confira o código informado."
             conn.execute(
                 """
                 INSERT INTO users (
-                    nome_completo, email, senha_hash, perfil, status, data_criacao
-                ) VALUES (?, ?, ?, 'USUARIO', 'PENDENTE_APROVACAO', ?)
+                    nome_completo, email, senha_hash, perfil, status, data_criacao,
+                    organization_id
+                ) VALUES (?, ?, ?, 'USUARIO', 'PENDENTE_APROVACAO', ?, ?)
                 """,
-                (name, email, hash_password(password), utc_iso()),
+                (name, email, hash_password(password), utc_iso(), organization["id"]),
             )
             conn.commit()
     except sqlite3.IntegrityError:
@@ -1932,6 +2430,17 @@ def authenticate_user(
         if not user or not verify_password(password, user["senha_hash"]):
             return HTTPStatus.UNAUTHORIZED, {"ok": False, "message": "E-mail ou senha inválidos."}, None
 
+        organization = conn.execute(
+            "SELECT nome, slug, status FROM organizations WHERE id = ?",
+            (user["organization_id"],),
+        ).fetchone()
+        if not organization or organization["status"] != "ATIVA":
+            return (
+                HTTPStatus.FORBIDDEN,
+                {"ok": False, "message": "A empresa está bloqueada ou indisponível."},
+                None,
+            )
+
         if not user["email_confirmado_em"]:
             return (
                 HTTPStatus.FORBIDDEN,
@@ -1979,7 +2488,11 @@ def authenticate_user(
             "ok": True,
             "message": "Login realizado com sucesso.",
             "redirect": "/app",
-            "user": public_user(user),
+            "user": {
+                **public_user(user),
+                "organization_name": organization["nome"],
+                "organization_slug": organization["slug"],
+            },
         }
         return HTTPStatus.OK, response, session_token
 
@@ -1994,9 +2507,12 @@ def lookup_session_user(token: str) -> dict[str, Any] | None:
     with open_auth_db() as conn:
         row = conn.execute(
             """
-            SELECT u.*, COALESCE(e.nome, '') AS equipe_nome, s.id AS session_id
+            SELECT u.*, COALESCE(e.nome, '') AS equipe_nome, s.id AS session_id,
+                   o.nome AS organization_name, o.slug AS organization_slug,
+                   o.status AS organization_status
             FROM sessions s
             JOIN users u ON u.id = s.user_id
+            JOIN organizations o ON o.id = u.organization_id
             LEFT JOIN equipes e ON e.id = u.equipe_id
             WHERE s.token_hash = ?
               AND s.ativo = 1
@@ -2007,7 +2523,11 @@ def lookup_session_user(token: str) -> dict[str, Any] | None:
         ).fetchone()
         if not row:
             return None
-        if row["status"] != "ATIVO" or not row["email_confirmado_em"]:
+        if (
+            row["status"] != "ATIVO"
+            or not row["email_confirmado_em"]
+            or row["organization_status"] != "ATIVA"
+        ):
             conn.execute(
                 "UPDATE sessions SET ativo = 0 WHERE id = ?",
                 (row["session_id"],),
@@ -2027,6 +2547,10 @@ def lookup_session_user(token: str) -> dict[str, Any] | None:
             "status": row["status"],
             "equipe_id": row["equipe_id"],
             "equipe_nome": row["equipe_nome"],
+            "organization_id": row["organization_id"],
+            "organization_name": row["organization_name"],
+            "organization_slug": row["organization_slug"],
+            "is_platform_admin": bool(row["is_platform_admin"]),
         }
 
 
@@ -2041,7 +2565,11 @@ def logout_session(token: str) -> None:
         conn.commit()
 
 
-def list_users(search: str = "", status: str = "") -> list[dict[str, Any]]:
+def list_users(
+    search: str = "",
+    status: str = "",
+    organization_id: int | None = None,
+) -> list[dict[str, Any]]:
     query = """
         SELECT users.*, COALESCE(equipes.nome, '') AS equipe_nome,
                COALESCE(gestores.nome_completo, '') AS gestor_nome
@@ -2054,77 +2582,112 @@ def list_users(search: str = "", status: str = "") -> list[dict[str, Any]]:
     search_value = clean_cell(search)
     status_value = clean_cell(status).upper()
 
+    if organization_id is not None:
+        query += " AND users.organization_id = ?"
+        params.append(int(organization_id))
+
     if search_value:
-        query += " AND (nome_completo LIKE ? OR email LIKE ?)"
+        query += " AND (users.nome_completo LIKE ? OR users.email LIKE ?)"
         like = f"%{search_value}%"
         params.extend([like, like])
     if status_value in AUTH_STATUSES:
-        query += " AND status = ?"
+        query += " AND users.status = ?"
         params.append(status_value)
 
-    query += " ORDER BY data_criacao DESC, id DESC"
+    query += " ORDER BY users.data_criacao DESC, users.id DESC"
     with open_auth_db() as conn:
         rows = conn.execute(query, params).fetchall()
         return [public_user(row) for row in rows]
 
 
-def list_teams() -> list[dict[str, Any]]:
+def list_teams(organization_id: int | None = None) -> list[dict[str, Any]]:
     with open_auth_db() as conn:
+        where = "WHERE equipes.organization_id = ?" if organization_id is not None else ""
+        params = (int(organization_id),) if organization_id is not None else ()
         rows = conn.execute(
-            """SELECT equipes.id, equipes.nome, COUNT(users.id) AS total_membros
+            f"""SELECT equipes.id, equipes.nome, COUNT(users.id) AS total_membros
                FROM equipes LEFT JOIN users ON users.equipe_id = equipes.id
-               GROUP BY equipes.id, equipes.nome ORDER BY equipes.nome COLLATE NOCASE"""
+               {where}
+               GROUP BY equipes.id, equipes.nome ORDER BY equipes.nome COLLATE NOCASE""",
+            params,
         ).fetchall()
     return [dict(row) for row in rows]
 
 
-def list_managers() -> list[dict[str, Any]]:
+def list_managers(organization_id: int | None = None) -> list[dict[str, Any]]:
     with open_auth_db() as conn:
+        organization_filter = " AND organization_id = ?" if organization_id is not None else ""
+        params = (int(organization_id),) if organization_id is not None else ()
         rows = conn.execute(
-            """
+            f"""
             SELECT id, nome_completo, email, status
             FROM users
             WHERE perfil = 'GESTOR' AND status != 'CANCELADO'
+            {organization_filter}
             ORDER BY nome_completo COLLATE NOCASE
-            """
+            """,
+            params,
         ).fetchall()
     return [dict(row) for row in rows]
 
 
-def create_team(name: Any) -> tuple[HTTPStatus, dict[str, Any]]:
+def create_team(
+    name: Any,
+    organization_id: int | None = None,
+) -> tuple[HTTPStatus, dict[str, Any]]:
     team_name = clean_cell(name)
     if len(team_name) < 2 or len(team_name) > 80:
         return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Informe um nome de equipe entre 2 e 80 caracteres."}
     with open_auth_db() as conn:
         try:
-            cursor = conn.execute("INSERT INTO equipes (nome, data_criacao) VALUES (?, ?)", (team_name, utc_iso()))
+            cursor = conn.execute(
+                "INSERT INTO equipes (nome, data_criacao, organization_id) VALUES (?, ?, ?)",
+                (team_name, utc_iso(), int(organization_id or 1)),
+            )
             conn.commit()
         except sqlite3.IntegrityError:
             return HTTPStatus.CONFLICT, {"ok": False, "message": "Já existe uma equipe com esse nome."}
     return HTTPStatus.CREATED, {"ok": True, "message": "Equipe criada com sucesso.", "team": {"id": cursor.lastrowid, "nome": team_name, "total_membros": 0}}
 
 
-def assign_user_team(user_id: int, team_id: int | None) -> tuple[HTTPStatus, dict[str, Any]]:
+def assign_user_team(
+    user_id: int,
+    team_id: int | None,
+    organization_id: int | None = None,
+) -> tuple[HTTPStatus, dict[str, Any]]:
     with open_auth_db() as conn:
         user = fetch_user_by_id(conn, user_id)
         if not user:
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
+        if organization_id is not None and user["organization_id"] != int(organization_id):
             return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
         if user["perfil"] == "SUPERVISOR" and team_id is None:
             return HTTPStatus.BAD_REQUEST, {
                 "ok": False,
                 "message": "O supervisor precisa permanecer vinculado a uma equipe.",
             }
-        if team_id is not None and not conn.execute("SELECT id FROM equipes WHERE id = ?", (team_id,)).fetchone():
-            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Equipe não encontrada."}
+        if team_id is not None:
+            team = conn.execute(
+                "SELECT id, organization_id FROM equipes WHERE id = ?",
+                (team_id,),
+            ).fetchone()
+            if not team or team["organization_id"] != user["organization_id"]:
+                return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Equipe não encontrada."}
         conn.execute("UPDATE users SET equipe_id = ? WHERE id = ?", (team_id, user_id))
         conn.commit()
     return HTTPStatus.OK, {"ok": True, "message": "Equipe do usuário atualizada com sucesso."}
 
 
-def assign_user_manager(user_id: int, manager_id: int | None) -> tuple[HTTPStatus, dict[str, Any]]:
+def assign_user_manager(
+    user_id: int,
+    manager_id: int | None,
+    organization_id: int | None = None,
+) -> tuple[HTTPStatus, dict[str, Any]]:
     with open_auth_db() as conn:
         user = fetch_user_by_id(conn, user_id)
         if not user:
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
+        if organization_id is not None and user["organization_id"] != int(organization_id):
             return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
         if user["perfil"] != "SUPERVISOR":
             return HTTPStatus.BAD_REQUEST, {
@@ -2137,6 +2700,11 @@ def assign_user_manager(user_id: int, manager_id: int | None) -> tuple[HTTPStatu
                 return HTTPStatus.BAD_REQUEST, {
                     "ok": False,
                     "message": "Selecione um usuário com perfil de gestor.",
+                }
+            if manager["organization_id"] != user["organization_id"]:
+                return HTTPStatus.BAD_REQUEST, {
+                    "ok": False,
+                    "message": "O gestor precisa pertencer à mesma empresa do supervisor.",
                 }
             if manager["status"] == "CANCELADO":
                 return HTTPStatus.BAD_REQUEST, {
@@ -2166,6 +2734,9 @@ def assign_user_profile(
         user = fetch_user_by_id(conn, user_id)
         if not user:
             return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
+        admin_organization_id = admin_user.get("organization_id")
+        if admin_organization_id is not None and user["organization_id"] != int(admin_organization_id):
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
         if user["id"] == admin_user["id"] and normalized_profile != "ADMIN":
             return HTTPStatus.BAD_REQUEST, {
                 "ok": False,
@@ -2188,7 +2759,8 @@ def assign_user_profile(
                 }
         if user["perfil"] == "ADMIN" and normalized_profile != "ADMIN":
             admin_count = conn.execute(
-                "SELECT COUNT(*) FROM users WHERE perfil = 'ADMIN'"
+                "SELECT COUNT(*) FROM users WHERE perfil = 'ADMIN' AND organization_id = ?",
+                (user["organization_id"],),
             ).fetchone()[0]
             if admin_count <= 1:
                 return HTTPStatus.BAD_REQUEST, {
@@ -2218,6 +2790,7 @@ def save_search_history(
     user_id: int,
     query_value: str,
     result: dict[str, Any],
+    organization_id: int | None = None,
 ) -> None:
     key = cnpj_key(query_value)
     if not key:
@@ -2235,27 +2808,34 @@ def save_search_history(
         total = 0
 
     with open_auth_db() as conn:
+        if organization_id is None:
+            user_row = fetch_user_by_id(conn, user_id)
+            if not user_row:
+                return
+            organization_id = int(user_row["organization_id"])
         now = utc_iso()
         conn.execute(
             """
             INSERT INTO search_events (
-                user_id, cnpj_key, cnpj_display, company_name, data_consulta, total
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                user_id, cnpj_key, cnpj_display, company_name, data_consulta, total,
+                organization_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, key, display, company_name, now, total),
+            (user_id, key, display, company_name, now, total, organization_id),
         )
         conn.execute(
             """
             INSERT INTO search_history (
-                user_id, cnpj_key, cnpj_display, company_name, data_consulta, total
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                user_id, cnpj_key, cnpj_display, company_name, data_consulta, total,
+                organization_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id, cnpj_key) DO UPDATE SET
                 cnpj_display = excluded.cnpj_display,
                 company_name = excluded.company_name,
                 data_consulta = excluded.data_consulta,
                 total = excluded.total
             """,
-            (user_id, key, display, company_name, now, total),
+            (user_id, key, display, company_name, now, total, organization_id),
         )
         conn.execute(
             """
@@ -2300,18 +2880,26 @@ def list_search_history(user_id: int) -> list[dict[str, Any]]:
     ]
 
 
-def manager_report_scope(manager_id: int) -> dict[str, Any]:
+def manager_report_scope(
+    manager_id: int,
+    organization_id: int | None = None,
+) -> dict[str, Any]:
     with open_auth_db() as conn:
+        organization_filter = " AND users.organization_id = ?" if organization_id is not None else ""
+        params: list[Any] = [manager_id]
+        if organization_id is not None:
+            params.append(int(organization_id))
         supervisors = conn.execute(
-            """
+            f"""
             SELECT users.id, users.nome_completo, users.equipe_id,
                    COALESCE(equipes.nome, '') AS equipe_nome
             FROM users
             LEFT JOIN equipes ON equipes.id = users.equipe_id
             WHERE users.gestor_id = ? AND users.perfil = 'SUPERVISOR'
+            {organization_filter}
             ORDER BY users.nome_completo COLLATE NOCASE
             """,
-            (manager_id,),
+            params,
         ).fetchall()
     return {
         "team_ids": sorted({row["equipe_id"] for row in supervisors if row["equipe_id"] is not None}),
@@ -2336,6 +2924,7 @@ def usage_ranking_report(
     supervisors: list[dict[str, Any]] | None = None,
     filter_team_id: int | None = None,
     filter_user_id: int | None = None,
+    organization_id: int | None = None,
 ) -> dict[str, Any]:
     zone = app_zoneinfo()
     now_utc = utc_now()
@@ -2353,6 +2942,9 @@ def usage_ranking_report(
         scoped_team_ids = team_ids if team_ids is not None else ([team_id] if team_id is not None else None)
         base_conditions: list[str] = []
         base_params: list[Any] = []
+        if organization_id is not None:
+            base_conditions.append("users.organization_id = ?")
+            base_params.append(int(organization_id))
         if scoped_team_ids is not None:
             if scoped_team_ids:
                 placeholders = ", ".join("?" for _ in scoped_team_ids)
@@ -2571,6 +3163,9 @@ def update_user_status(
     with open_auth_db() as conn:
         user = fetch_user_by_id(conn, user_id)
         if not user:
+            return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
+        admin_organization_id = admin_user.get("organization_id")
+        if admin_organization_id is not None and user["organization_id"] != int(admin_organization_id):
             return HTTPStatus.NOT_FOUND, {"ok": False, "message": "Usuário não encontrado."}
         if user["id"] == admin_user["id"] and normalized_action in {"bloquear", "cancelar"}:
             return (
@@ -2870,7 +3465,16 @@ def request_email_verification(
                     ),
                 )
                 conn.commit()
-                verification_link = f"{base_url}/confirmar-email?token={raw_token}"
+                organization = conn.execute(
+                    "SELECT slug FROM organizations WHERE id = ?",
+                    (user["organization_id"],),
+                ).fetchone()
+                organization_query = (
+                    f"&empresa={organization['slug']}" if organization else ""
+                )
+                verification_link = (
+                    f"{base_url}/confirmar-email?token={raw_token}{organization_query}"
+                )
                 try:
                     send_email_verification_email(
                         normalized_email,
@@ -2991,7 +3595,16 @@ def request_password_reset(
                     ),
                 )
                 conn.commit()
-                reset_link = f"{base_url}/redefinir-senha?token={raw_token}"
+                organization = conn.execute(
+                    "SELECT slug FROM organizations WHERE id = ?",
+                    (user["organization_id"],),
+                ).fetchone()
+                organization_query = (
+                    f"&empresa={organization['slug']}" if organization else ""
+                )
+                reset_link = (
+                    f"{base_url}/redefinir-senha?token={raw_token}{organization_query}"
+                )
                 try:
                     send_password_reset_email(normalized_email, reset_link)
                 except Exception as error:
@@ -3170,6 +3783,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         self,
         admin: bool = False,
         reports: bool = False,
+        platform: bool = False,
     ) -> dict[str, Any] | None:
         user = self.get_current_user()
         if not user:
@@ -3181,12 +3795,16 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         if reports and user["perfil"] not in REPORT_PROFILES:
             self.send_error(HTTPStatus.FORBIDDEN)
             return None
+        if platform and not user.get("is_platform_admin"):
+            self.send_error(HTTPStatus.FORBIDDEN)
+            return None
         return user
 
     def require_api_user(
         self,
         admin: bool = False,
         reports: bool = False,
+        platform: bool = False,
     ) -> dict[str, Any] | None:
         user = self.get_current_user()
         if not user:
@@ -3204,6 +3822,12 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         if reports and user["perfil"] not in REPORT_PROFILES:
             self.send_json(
                 {"ok": False, "message": "Acesso restrito a administradores, gestores e supervisores."},
+                status=HTTPStatus.FORBIDDEN,
+            )
+            return None
+        if platform and not user.get("is_platform_admin"):
+            self.send_json(
+                {"ok": False, "message": "Acesso restrito ao administrador da plataforma."},
                 status=HTTPStatus.FORBIDDEN,
             )
             return None
@@ -3279,6 +3903,37 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             self.serve_static_file(STATIC_DIR / "admin-reports.html", "text/html; charset=utf-8")
             return
 
+        if parsed.path == "/admin/empresas":
+            if not self.require_page_user(platform=True):
+                return
+            self.serve_static_file(STATIC_DIR / "admin-organizations.html", "text/html; charset=utf-8")
+            return
+
+        if parsed.path == "/api/branding/logo":
+            current_user = self.get_current_user()
+            organization_id = (
+                int(current_user["organization_id"])
+                if current_user
+                else None
+            )
+            if organization_id is None:
+                params = parse_qs(parsed.query)
+                organization_slug = normalize_organization_slug(
+                    params.get("empresa", [""])[0]
+                )
+                if organization_slug:
+                    with open_auth_db() as conn:
+                        organization = fetch_organization_by_slug(conn, organization_slug)
+                    if organization and organization["status"] == "ATIVA":
+                        organization_id = int(organization["id"])
+            logo = organization_logo(organization_id) if organization_id is not None else None
+            if logo:
+                self.send_image(logo[0].read_bytes(), logo[1])
+            else:
+                fallback = STATIC_DIR / "assets" / "a7connect-logo.jpg"
+                self.send_image(fallback.read_bytes(), "image/jpeg")
+            return
+
         if parsed.path == "/api/auth/me":
             user = self.get_current_user()
             if not user:
@@ -3288,7 +3943,8 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path == "/api/admin/users":
-            if not self.require_api_user(admin=True):
+            admin_user = self.require_api_user(admin=True)
+            if not admin_user:
                 return
             params = parse_qs(parsed.query)
             self.send_json(
@@ -3297,16 +3953,24 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                     "users": list_users(
                         params.get("search", [""])[0],
                         params.get("status", [""])[0],
+                        admin_user["organization_id"],
                     ),
-                    "managers": list_managers(),
+                    "managers": list_managers(admin_user["organization_id"]),
                 }
             )
             return
 
         if parsed.path == "/api/admin/teams":
-            if not self.require_api_user(admin=True):
+            admin_user = self.require_api_user(admin=True)
+            if not admin_user:
                 return
-            self.send_json({"ok": True, "teams": list_teams()})
+            self.send_json({"ok": True, "teams": list_teams(admin_user["organization_id"])})
+            return
+
+        if parsed.path == "/api/platform/organizations":
+            if not self.require_api_user(platform=True):
+                return
+            self.send_json({"ok": True, "organizations": list_organizations()})
             return
 
         if parsed.path == "/api/admin/reports/usage":
@@ -3341,11 +4005,12 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                         team_name=user["equipe_nome"],
                         filter_team_id=filter_team_id,
                         filter_user_id=filter_user_id,
+                        organization_id=user["organization_id"],
                     )
                 )
                 return
             if user["perfil"] == "GESTOR":
-                scope = manager_report_scope(user["id"])
+                scope = manager_report_scope(user["id"], user["organization_id"])
                 self.send_json(
                     usage_ranking_report(
                         team_ids=scope["team_ids"],
@@ -3353,6 +4018,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                         supervisors=scope["supervisors"],
                         filter_team_id=filter_team_id,
                         filter_user_id=filter_user_id,
+                        organization_id=user["organization_id"],
                     )
                 )
                 return
@@ -3360,14 +4026,16 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 usage_ranking_report(
                     filter_team_id=filter_team_id,
                     filter_user_id=filter_user_id,
+                    organization_id=user["organization_id"],
                 )
             )
             return
 
         if parsed.path == "/api/status":
-            if not self.require_api_user():
+            user = self.require_api_user()
+            if not user:
                 return
-            self.send_json(APP_STATE)
+            self.send_json(get_organization_state(user["organization_id"]))
             return
 
         if parsed.path == "/api/history":
@@ -3381,40 +4049,54 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             user = self.require_api_user()
             if not user:
                 return
-            if not APP_STATE.get("ready"):
-                self.send_json(APP_STATE, status=HTTPStatus.SERVICE_UNAVAILABLE)
+            state = get_organization_state(user["organization_id"])
+            if not state.get("ready"):
+                self.send_json(state, status=HTTPStatus.SERVICE_UNAVAILABLE)
                 return
 
             params = parse_qs(parsed.query)
             cnpj = params.get("cnpj", [""])[0]
-            result = query_cnpj(cnpj)
-            save_search_history(user["id"], cnpj, result)
+            result = query_cnpj(cnpj, organization_db_path(user["organization_id"]))
+            save_search_history(user["id"], cnpj, result, user["organization_id"])
             self.send_json(result)
             return
 
         if parsed.path == "/api/detail":
-            if not self.require_api_user():
+            user = self.require_api_user()
+            if not user:
                 return
-            if not APP_STATE.get("ready"):
-                self.send_json(APP_STATE, status=HTTPStatus.SERVICE_UNAVAILABLE)
+            state = get_organization_state(user["organization_id"])
+            if not state.get("ready"):
+                self.send_json(state, status=HTTPStatus.SERVICE_UNAVAILABLE)
                 return
 
             params = parse_qs(parsed.query)
             cnpj = params.get("cnpj", [""])[0]
             detail_type = params.get("type", [""])[0]
-            self.send_json(query_detail(cnpj, detail_type))
+            self.send_json(
+                query_detail(
+                    cnpj,
+                    detail_type,
+                    organization_db_path(user["organization_id"]),
+                )
+            )
             return
 
         if parsed.path == "/api/export/pdf":
-            if not self.require_api_user():
+            user = self.require_api_user()
+            if not user:
                 return
-            if not APP_STATE.get("ready"):
-                self.send_json(APP_STATE, status=HTTPStatus.SERVICE_UNAVAILABLE)
+            state = get_organization_state(user["organization_id"])
+            if not state.get("ready"):
+                self.send_json(state, status=HTTPStatus.SERVICE_UNAVAILABLE)
                 return
 
             params = parse_qs(parsed.query)
             cnpj = params.get("cnpj", [""])[0]
-            status, payload, filename = build_cnpj_pdf(cnpj)
+            status, payload, filename = build_cnpj_pdf(
+                cnpj,
+                organization_db_path(user["organization_id"]),
+            )
             if isinstance(payload, dict):
                 self.send_json(payload, status=status)
                 return
@@ -3445,6 +4127,24 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
 
+        if parsed.path == "/api/admin/branding/logo":
+            admin_user = self.require_api_user(admin=True)
+            if not admin_user:
+                return
+            status, message, body = self.read_limited_body(MAX_LOGO_UPLOAD_BYTES)
+            if body is None:
+                self.send_json({"ok": False, "message": message}, status=status)
+                return
+            with organization_data_lock(admin_user["organization_id"]):
+                response_status, response = save_organization_logo(
+                    admin_user["organization_id"],
+                    admin_user["id"],
+                    body,
+                    self.headers.get("Content-Type", ""),
+                )
+            self.send_json(response, status=response_status)
+            return
+
         if parsed.path == "/api/admin/data/upload":
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
@@ -3460,10 +4160,13 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 params = parse_qs(parsed.query)
                 refresh_value = clean_cell(params.get("refresh", ["1"])[0]).lower()
                 refresh_after_upload = refresh_value not in {"0", "false", "nao", "não"}
-                response_status, response = save_uploaded_data_files(
-                    parts,
-                    refresh_after_upload=refresh_after_upload,
-                )
+                with organization_data_lock(admin_user["organization_id"]):
+                    response_status, response = save_uploaded_data_files(
+                        parts,
+                        refresh_after_upload=refresh_after_upload,
+                        organization_id=admin_user["organization_id"],
+                        uploaded_by=admin_user["id"],
+                    )
             except ValueError as error:
                 self.send_json(
                     {"ok": False, "message": str(error)},
@@ -3550,9 +4253,14 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/data/refresh":
             data = self.read_json_body()
-            if not self.require_api_user():
+            admin_user = self.require_api_user(admin=True)
+            if not admin_user:
                 return
-            state = refresh_data(force_rebuild=bool(data.get("force")))
+            with organization_data_lock(admin_user["organization_id"]):
+                state = refresh_data(
+                    force_rebuild=bool(data.get("force")),
+                    organization_id=admin_user["organization_id"],
+                )
             response_status = HTTPStatus.OK if state.get("ready") else HTTPStatus.SERVICE_UNAVAILABLE
             self.send_json(
                 {
@@ -3589,15 +4297,17 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/admin/teams":
             data = self.read_json_body()
-            if not self.require_api_user(admin=True):
+            admin_user = self.require_api_user(admin=True)
+            if not admin_user:
                 return
-            status, response = create_team(data.get("nome"))
+            status, response = create_team(data.get("nome"), admin_user["organization_id"])
             self.send_json(response, status=status)
             return
 
         if parsed.path == "/api/admin/users/team":
             data = self.read_json_body()
-            if not self.require_api_user(admin=True):
+            admin_user = self.require_api_user(admin=True)
+            if not admin_user:
                 return
             try:
                 user_id = int(data.get("user_id"))
@@ -3606,7 +4316,11 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             except (TypeError, ValueError):
                 self.send_json({"ok": False, "message": "Usuário ou equipe inválida."}, status=HTTPStatus.BAD_REQUEST)
                 return
-            status, response = assign_user_team(user_id, team_id)
+            status, response = assign_user_team(
+                user_id,
+                team_id,
+                admin_user["organization_id"],
+            )
             self.send_json(response, status=status)
             return
 
@@ -3629,7 +4343,8 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/admin/users/manager":
             data = self.read_json_body()
-            if not self.require_api_user(admin=True):
+            admin_user = self.require_api_user(admin=True)
+            if not admin_user:
                 return
             try:
                 user_id = int(data.get("user_id"))
@@ -3641,7 +4356,41 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                     status=HTTPStatus.BAD_REQUEST,
                 )
                 return
-            status, response = assign_user_manager(user_id, manager_id)
+            status, response = assign_user_manager(
+                user_id,
+                manager_id,
+                admin_user["organization_id"],
+            )
+            self.send_json(response, status=status)
+            return
+
+        if parsed.path == "/api/platform/organizations":
+            data = self.read_json_body()
+            platform_user = self.require_api_user(platform=True)
+            if not platform_user:
+                return
+            status, response = create_organization(platform_user, data)
+            self.send_json(response, status=status)
+            return
+
+        if parsed.path == "/api/platform/organizations/status":
+            data = self.read_json_body()
+            platform_user = self.require_api_user(platform=True)
+            if not platform_user:
+                return
+            try:
+                organization_id = int(data.get("organization_id"))
+            except (TypeError, ValueError):
+                self.send_json(
+                    {"ok": False, "message": "Empresa inválida."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            status, response = update_organization_status(
+                platform_user,
+                organization_id,
+                data.get("status"),
+            )
             self.send_json(response, status=status)
             return
 
@@ -3662,6 +4411,15 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
         self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_image(self, body: bytes, content_type: str) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "private, max-age=60")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(body)
 
@@ -3693,6 +4451,7 @@ def run() -> None:
 
     print("Inicializando base local...")
     APP_STATE = initialize_data()
+    APP_STATES[1] = APP_STATE
     if APP_STATE["ready"]:
         total = sum(source["indexed_count"] for source in APP_STATE["sources"])
         print(f"Base pronta: {total} registros indexados.")

@@ -433,7 +433,7 @@ class EmailVerificationTest(unittest.TestCase):
         self.assertTrue(files)
         newest = max(files, key=lambda path: path.stat().st_mtime_ns)
         content = newest.read_text(encoding="utf-8")
-        match = re.search(r"confirmar-email\?token=([^\s]+)", content)
+        match = re.search(r"confirmar-email\?token=([^&\s]+)", content)
         self.assertIsNotNone(match)
         return match.group(1)
 
@@ -1089,6 +1089,180 @@ class SearchHistoryTest(unittest.TestCase):
         self.assertEqual(sum(item["consultas"] for item in report["daily_trend"]), 2)
         self.assertEqual(report["top_clients"][0]["consultas"], 2)
         self.assertEqual(report["teams"][0]["equipe"], "Sem equipe")
+
+
+class MultiOrganizationTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_auth_db_path = app.AUTH_DB_PATH
+        self.original_cache_dir = app.CACHE_DIR
+        self.original_admin_password = os.environ.get("ADMIN_PASSWORD")
+        os.environ["ADMIN_PASSWORD"] = "Senha1234"
+        app.CACHE_DIR = Path(self.temp_dir.name) / "cache"
+        app.AUTH_DB_PATH = app.CACHE_DIR / "auth.sqlite3"
+        app.initialize_auth_database()
+
+    def tearDown(self):
+        app.AUTH_DB_PATH = self.original_auth_db_path
+        app.CACHE_DIR = self.original_cache_dir
+        if self.original_admin_password is None:
+            os.environ.pop("ADMIN_PASSWORD", None)
+        else:
+            os.environ["ADMIN_PASSWORD"] = self.original_admin_password
+        app.APP_STATES.clear()
+        self.temp_dir.cleanup()
+
+    def test_platform_admin_creates_isolated_company_and_admin(self):
+        with app.open_auth_db() as conn:
+            platform = app.public_user(app.fetch_user_by_id(conn, 1))
+
+        status, response = app.create_organization(
+            platform,
+            {
+                "nome": "Cliente Exemplo",
+                "slug": "cliente-exemplo",
+                "admin_nome": "Admin Cliente",
+                "admin_email": "admin@cliente.example",
+                "admin_senha": "SenhaCliente123",
+            },
+        )
+
+        self.assertEqual(status, app.HTTPStatus.CREATED)
+        organization_id = response["organization"]["id"]
+        company_users = app.list_users(organization_id=organization_id)
+        default_users = app.list_users(organization_id=1)
+        self.assertEqual([user["email"] for user in company_users], ["admin@cliente.example"])
+        self.assertNotIn("admin@cliente.example", [user["email"] for user in default_users])
+
+        login_status, _, token = app.authenticate_user(
+            "admin@cliente.example", "SenhaCliente123", "127.0.0.1", "tests"
+        )
+        self.assertEqual(login_status, app.HTTPStatus.OK)
+        session_user = app.lookup_session_user(token)
+        self.assertEqual(session_user["organization_id"], organization_id)
+        self.assertEqual(session_user["organization_name"], "Cliente Exemplo")
+        self.assertFalse(session_user["is_platform_admin"])
+
+    def test_registration_code_assigns_user_to_company(self):
+        with app.open_auth_db() as conn:
+            platform = app.public_user(app.fetch_user_by_id(conn, 1))
+        _, created = app.create_organization(
+            platform,
+            {
+                "nome": "Empresa Cadastro",
+                "slug": "empresa-cadastro",
+                "admin_nome": "Admin Empresa",
+                "admin_email": "admin@cadastro.example",
+                "admin_senha": "SenhaCliente123",
+            },
+        )
+
+        ok, _ = app.create_pending_user(
+            {
+                "organization_slug": "empresa-cadastro",
+                "nome_completo": "Pessoa da Empresa",
+                "email": "pessoa@cadastro.example",
+                "senha": "SenhaPessoa123",
+                "senha_confirmacao": "SenhaPessoa123",
+            },
+            "127.0.0.1",
+            "tests",
+            "http://127.0.0.1:8000",
+        )
+
+        self.assertTrue(ok)
+        company_users = app.list_users(organization_id=created["organization"]["id"])
+        self.assertEqual(
+            {user["email"] for user in company_users},
+            {"admin@cadastro.example", "pessoa@cadastro.example"},
+        )
+
+    def test_company_admin_uploads_logo_only_to_own_branding_directory(self):
+        original_data_dir = app.DATA_DIR
+        app.DATA_DIR = Path(self.temp_dir.name) / "data"
+        try:
+            with app.open_auth_db() as conn:
+                platform = app.public_user(app.fetch_user_by_id(conn, 1))
+            _, created = app.create_organization(
+                platform,
+                {
+                    "nome": "Empresa com Logo",
+                    "slug": "empresa-logo",
+                    "admin_nome": "Admin Logo",
+                    "admin_email": "admin@logo.example",
+                    "admin_senha": "SenhaCliente123",
+                },
+            )
+            organization_id = created["organization"]["id"]
+            admin_id = created["admin"]["id"]
+            png = b"\x89PNG\r\n\x1a\n" + b"logo-test"
+
+            status, response = app.save_organization_logo(
+                organization_id,
+                admin_id,
+                png,
+                "image/png",
+            )
+            saved_logo = app.organization_logo(organization_id)
+            default_logo = app.organization_logo(1)
+        finally:
+            app.DATA_DIR = original_data_dir
+
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+        self.assertIsNotNone(saved_logo)
+        self.assertEqual(saved_logo[1], "image/png")
+        self.assertEqual(saved_logo[0].read_bytes(), png)
+        self.assertIsNone(default_logo)
+
+    def test_logo_rejects_content_that_is_not_an_allowed_image(self):
+        with self.assertRaises(ValueError):
+            app.detect_logo_image(b"<svg><script>alert(1)</script></svg>", "image/svg+xml")
+
+    def test_company_data_files_and_indexes_are_separate(self):
+        original_root = app.ROOT
+        original_data_dir = app.DATA_DIR
+        original_db_path = app.DB_PATH
+        original_data_files = app.DATA_FILES
+        original_file_by_key = app.DATA_FILE_BY_KEY
+        root = Path(self.temp_dir.name) / "workspace"
+        try:
+            app.ROOT = root
+            app.DATA_DIR = root / "data"
+            app.DB_PATH = app.CACHE_DIR / "consulta_base.sqlite3"
+            app.DATA_FILES = [
+                {
+                    "key": "mapa_parque",
+                    "label": "MAPA PARQUE",
+                    "path": app.DATA_DIR / "MAPA PARQUE.csv",
+                    "cnpj_columns": ["NR_CNPJ"],
+                    "cliente_columns": ["NM_CLIENTE"],
+                }
+            ]
+            app.DATA_FILE_BY_KEY = {item["key"]: item for item in app.DATA_FILES}
+
+            default_file = app.organization_data_files(1)[0]["path"]
+            second_file = app.organization_data_files(2)[0]["path"]
+            default_file.parent.mkdir(parents=True, exist_ok=True)
+            second_file.parent.mkdir(parents=True, exist_ok=True)
+            default_file.write_text("NR_CNPJ;NM_CLIENTE\n11;Cliente Um\n", encoding="utf-8")
+            second_file.write_text("NR_CNPJ;NM_CLIENTE\n22;Cliente Dois\n", encoding="utf-8")
+
+            self.assertTrue(app.initialize_data(organization_id=1)["ready"])
+            self.assertTrue(app.initialize_data(organization_id=2)["ready"])
+            first_result = app.query_cnpj("11", app.organization_db_path(1))
+            crossed_result = app.query_cnpj("11", app.organization_db_path(2))
+            second_result = app.query_cnpj("22", app.organization_db_path(2))
+        finally:
+            app.ROOT = original_root
+            app.DATA_DIR = original_data_dir
+            app.DB_PATH = original_db_path
+            app.DATA_FILES = original_data_files
+            app.DATA_FILE_BY_KEY = original_file_by_key
+
+        self.assertEqual(first_result["company_name"], "Cliente Um")
+        self.assertEqual(crossed_result["total"], 0)
+        self.assertEqual(second_result["company_name"], "Cliente Dois")
 
 
 if __name__ == "__main__":

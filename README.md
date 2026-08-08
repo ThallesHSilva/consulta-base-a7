@@ -1,6 +1,24 @@
 # Consulta Base
 
-Aplicacao local para consulta direta por CNPJ usando os CSVs salvos no projeto.
+Plataforma multiempresa para consulta direta por CNPJ usando bases CSV enviadas por cada cliente.
+
+## Modelo multiempresa
+
+- A primeira instalacao cria uma empresa padrao e preserva os arquivos existentes em `data/`.
+- O primeiro administrador tambem e administrador da plataforma e pode cadastrar clientes em `/admin/empresas`.
+- Cada nova empresa recebe um administrador proprio, um link de cadastro e diretorios de dados separados.
+- Cada administrador pode enviar a logo da propria empresa em `/admin/usuarios`; a marca e aplicada automaticamente nas telas autenticadas e nos links personalizados de login/cadastro.
+- Usuarios, equipes, historicos, relatorios, uploads e indices de consulta sao sempre filtrados pela empresa da sessao.
+- Novas empresas armazenam CSVs em `data/organizations/<id>/` e o indice em `.cache/organizations/<id>/`.
+- Ao substituir uma base, a versao anterior e preservada em `.versions/` dentro do diretorio da empresa.
+- Nao existe cobranca ou assinatura: a ativacao e o bloqueio da empresa sao controlados pelo administrador da plataforma.
+
+Fluxo recomendado:
+
+1. Entre com o primeiro administrador.
+2. Acesse `/admin/empresas` e crie a empresa com seu administrador inicial.
+3. Entregue ao cliente o link de cadastro exibido no painel.
+4. O administrador da empresa entra em `/admin/usuarios`, envia as proprias bases e aprova sua equipe.
 
 ## Dados esperados
 
@@ -43,7 +61,10 @@ PORT=8000
 PUBLIC_BASE_URL=https://seu-dominio.com.br
 SESSION_COOKIE_SECURE=auto
 MAX_UPLOAD_BYTES=314572800
+MAX_LOGO_UPLOAD_BYTES=5242880
 APP_TIMEZONE=America/Sao_Paulo
+DEFAULT_ORGANIZATION_NAME='A7 Connect'
+DEFAULT_ORGANIZATION_SLUG=a7-connect
 ADMIN_EMAIL=admin@seu-dominio.com.br
 ADMIN_NAME='Nome do Administrador'
 ADMIN_PASSWORD='troque-esta-senha'
@@ -64,6 +85,9 @@ Observacoes importantes:
 - Use `SESSION_COOKIE_SECURE=1` apenas quando todo acesso estiver em HTTPS. Em teste por HTTP direto, use `auto` ou `0`.
 - A sessão de login dura no máximo 2 horas. Um novo login da mesma conta invalida automaticamente a sessão anterior, inclusive em outro dispositivo.
 - O painel administrativo envia os CSVs por `POST /api/admin/data/upload`; o envio exige usuario `ADMIN` e pode ser feito em etapas.
+- O endpoint de upload ignora qualquer identificador de empresa enviado pelo navegador e usa exclusivamente a empresa da sessao autenticada.
+- Logos aceitam PNG, JPG ou WebP, usam limite padrao de 5 MB e tambem ficam isoladas no diretorio da empresa.
+- O primeiro administrador recebe permissao de plataforma para criar e bloquear empresas. Administradores criados para clientes gerenciam somente sua propria empresa.
 - Os CSVs de `data/` são ignorados pelo Git e pelo contexto de build do Docker. A imagem não contém bases operacionais.
 - No Docker Compose, o volume nomeado `app-data` preserva os arquivos enviados pelo painel fora do repositório, inclusive após reconstruir o contêiner.
 - Não use `docker compose down -v` em produção: a opção `-v` remove os volumes `app-data` e `app-cache`.

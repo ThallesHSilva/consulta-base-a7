@@ -34,6 +34,17 @@
         </div>
         <form id="registerForm" class="auth-form">
           <label>
+            <span>Código da empresa</span>
+            <input
+              id="registerOrganization"
+              name="organization_slug"
+              type="text"
+              autocomplete="organization"
+              placeholder="fornecido pelo administrador"
+              required
+            />
+          </label>
+          <label>
             <span>Nome completo</span>
             <input id="registerName" name="nome_completo" type="text" autocomplete="name" required />
           </label>

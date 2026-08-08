@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Empresas - A7 Connect</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-layout">
+      <aside class="sidebar" aria-label="Navegação principal">
+        <div class="sidebar-brand">
+          <img class="brand-logo" src="/api/branding/logo" alt="Logo da empresa" />
+        </div>
+        <nav class="sidebar-nav">
+          <a class="nav-item" href="/app"><span>Consulta por CNPJ</span></a>
+          <a id="adminNavItem" class="nav-item" href="/admin/usuarios"><span>Painel Administrativo</span></a>
+          <a id="adminReportsNavItem" class="nav-item" href="/admin/relatorios"><span>Relatórios</span></a>
+          <a id="platformOrganizationsNavItem" class="nav-item active" href="/admin/empresas"><span>Empresas</span></a>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="user-card">
+            <span id="currentUserInitials" class="avatar" aria-hidden="true">--</span>
+            <div><strong id="currentUserName">Usuário</strong><span id="currentUserRole">Perfil</span></div>
+          </div>
+          <button id="logoutButton" class="logout-button" type="button"><span>Sair</span></button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="page-header">
+          <div class="title-stack">
+            <span class="eyebrow">Plataforma</span>
+            <h1>Empresas</h1>
+            <p>Crie clientes da consultoria e entregue um ambiente com bases totalmente separadas.</p>
+          </div>
+        </header>
+
+        <section class="dashboard-card">
+          <div class="panel-title-row">
+            <div><span class="eyebrow">Nova empresa</span><h2>Empresa e administrador inicial</h2></div>
+            <span class="badge neutral">Administrador da plataforma</span>
+          </div>
+          <form id="organizationForm" class="auth-form">
+            <div class="upload-grid">
+              <label><span>Nome da empresa</span><input id="organizationName" type="text" required /></label>
+              <label><span>Código de acesso</span><input id="organizationSlug" type="text" placeholder="empresa-exemplo" /></label>
+              <label><span>Nome do administrador</span><input id="organizationAdminName" type="text" required /></label>
+              <label><span>E-mail do administrador</span><input id="organizationAdminEmail" type="email" required /></label>
+              <label><span>Senha inicial</span><input id="organizationAdminPassword" type="password" minlength="8" required /></label>
+            </div>
+            <div class="upload-actions">
+              <button class="gradient-button" type="submit">Criar empresa</button>
+            </div>
+            <p id="organizationMessage" class="auth-message" aria-live="polite" hidden></p>
+          </form>
+        </section>
+
+        <section class="dashboard-card">
+          <div class="panel-title-row">
+            <div><span class="eyebrow">Clientes</span><h2>Empresas cadastradas</h2></div>
+            <span id="organizationsCount" class="badge neutral">0 empresas</span>
+          </div>
+          <div id="organizationsList" class="organizations-list"></div>
+        </section>
+      </main>
+    </div>
+    <script src="/static/session.js"></script>
+    <script src="/static/admin-organizations.js"></script>
+  </body>
+</html>

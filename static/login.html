@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Entrar - A7 Connect</title>
+    <title>Acesso | Consulta Base</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -12,44 +12,72 @@
     />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body class="auth-body">
-    <main class="auth-shell">
-      <section class="auth-brand-panel">
-        <img class="auth-logo" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
-        <div>
-          <span class="eyebrow">Consulta Base</span>
-          <h1>Acesso seguro ao painel comercial</h1>
-          <p>Entre com sua conta autorizada para consultar clientes e indicadores internos.</p>
+  <body class="auth-body login-page">
+    <main class="auth-shell login-shell">
+      <section class="auth-brand-panel login-showcase" aria-label="Sobre a plataforma">
+        <div class="login-showcase-copy">
+          <span class="login-kicker">Inteligência comercial</span>
+          <h1>Decisões melhores começam com uma visão completa.</h1>
+          <p>
+            Consulte clientes, identifique oportunidades e acompanhe sua operação em um ambiente
+            seguro, rápido e exclusivo para sua empresa.
+          </p>
         </div>
       </section>
 
-      <section class="auth-card dashboard-card" aria-label="Login">
-        <div class="auth-tabs">
-          <a class="auth-tab active" href="/login">Entrar</a>
-          <a class="auth-tab" href="/cadastro">Criar conta</a>
+      <section class="auth-card login-card" aria-label="Login">
+        <div class="login-card-header">
+          <span class="login-card-kicker">Acesso exclusivo</span>
+          <h2>Bem-vindo de volta</h2>
+          <p>Entre com suas credenciais corporativas para continuar.</p>
         </div>
-        <div class="auth-heading">
-          <h2>Entrar</h2>
-          <p>Use seu e-mail corporativo e senha.</p>
-        </div>
-        <form id="loginForm" class="auth-form">
+
+        <form id="loginForm" class="auth-form login-form">
           <label>
-            <span>E-mail</span>
-            <input id="loginEmail" name="email" type="email" autocomplete="email" required />
+            <span>E-mail corporativo</span>
+            <input
+              id="loginEmail"
+              name="email"
+              type="email"
+              autocomplete="email"
+              placeholder="nome@empresa.com.br"
+              required
+            />
           </label>
           <label>
             <span>Senha</span>
-            <input id="loginPassword" name="senha" type="password" autocomplete="current-password" required />
+            <div class="login-password-field">
+              <input
+                id="loginPassword"
+                name="senha"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Digite sua senha"
+                required
+              />
+              <button id="toggleLoginPassword" type="button" aria-label="Mostrar senha" aria-pressed="false">
+                Mostrar
+              </button>
+            </div>
           </label>
-          <div class="auth-form-row">
-            <a class="text-link" href="/esqueci-senha">Esqueci minha senha</a>
+          <div class="login-form-links">
+            <span class="login-security-note"><i aria-hidden="true"></i> Conexão protegida</span>
+            <a class="text-link" data-preserve-company href="/esqueci-senha">Esqueci minha senha</a>
           </div>
-          <button class="gradient-button auth-submit" type="submit">Entrar</button>
+          <button class="gradient-button auth-submit login-submit" type="submit">
+            <span>Entrar na plataforma</span><span aria-hidden="true">→</span>
+          </button>
           <p id="authMessage" class="auth-message" aria-live="polite" hidden></p>
           <button id="resendVerificationButton" class="text-link centered" type="button" hidden>
             Reenviar e-mail de confirmação
           </button>
         </form>
+
+        <div class="login-card-footer">
+          <span>Primeiro acesso?</span>
+          <a data-preserve-company href="/cadastro">Solicitar acesso à sua empresa</a>
+        </div>
+        <p class="login-support">Acesso restrito a usuários autorizados.</p>
       </section>
     </main>
 

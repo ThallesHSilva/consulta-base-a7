@@ -12,11 +12,11 @@
     />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body class="detail-page">
     <div class="app-layout">
       <aside class="sidebar" aria-label="Navegação principal">
         <div class="sidebar-brand">
-          <img class="brand-logo" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+          <img class="brand-logo" src="/api/branding/logo" alt="Logo da empresa" />
         </div>
 
         <nav class="sidebar-nav">
@@ -55,21 +55,6 @@
             </svg>
             <span>Histórico</span>
           </a>
-          <a class="nav-item" href="#" title="Configurações">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-              <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7.2 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 .9-1.6V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 20 7.2l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6.9h.2a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.8.8Z" />
-            </svg>
-            <span>Configurações</span>
-          </a>
-          <a class="nav-item" href="#" title="Ajuda">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M9.8 9a2.4 2.4 0 0 1 4.5 1.2c0 1.8-2.3 2.1-2.3 3.6" />
-              <path d="M12 17h.01" />
-            </svg>
-            <span>Ajuda</span>
-          </a>
         </nav>
 
         <div class="sidebar-footer">
@@ -91,8 +76,9 @@
         </div>
       </aside>
 
-      <main class="workspace">
-        <header class="page-header">
+      <main class="workspace detail-workspace">
+        <section class="detail-hero" aria-labelledby="detailTitle">
+        <header class="page-header detail-page-header">
           <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Abrir menu">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 7h16" />
@@ -101,9 +87,9 @@
             </svg>
           </button>
           <div class="title-stack">
-            <span class="eyebrow">Consulta Base</span>
+            <span id="detailEyebrow" class="eyebrow">Visão detalhada</span>
             <h1 id="detailTitle">Detalhamento</h1>
-            <p>Analise as informações vinculadas ao CNPJ consultado</p>
+            <p>Analise serviços, valores e oportunidades vinculadas ao CNPJ consultado.</p>
           </div>
           <div class="header-actions">
             <a id="backLink" class="outline-button back-link" href="/">
@@ -113,15 +99,6 @@
               </svg>
               <span>Voltar</span>
             </a>
-            <div class="analytics-illustration compact" aria-hidden="true">
-              <svg viewBox="0 0 120 96">
-                <circle cx="48" cy="38" r="24" />
-                <path d="M66 56 95 85" />
-                <rect x="77" y="54" width="9" height="24" rx="3" />
-                <rect x="92" y="43" width="9" height="35" rx="3" />
-                <rect x="107" y="32" width="9" height="46" rx="3" />
-              </svg>
-            </div>
           </div>
         </header>
 
@@ -154,10 +131,18 @@
             <div class="client-copy">
               <span class="section-label">CNPJ consultado</span>
               <strong id="detailCnpj" class="highlight-value">-</strong>
-              <span class="badge success">Consulta preservada</span>
             </div>
           </article>
         </section>
+        </section>
+
+        <header class="detail-content-header">
+          <div>
+            <span id="detailContentKicker" class="eyebrow">Dados do portfólio</span>
+            <h2 id="detailContentTitle">Informações detalhadas</h2>
+          </div>
+          <span id="detailItemCount" class="detail-item-count">Carregando</span>
+        </header>
 
         <section id="detailContent" class="detail-panel dashboard-card" aria-live="polite"></section>
       </main>

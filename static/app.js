@@ -10,6 +10,7 @@ const companyPanel = document.querySelector("#companyPanel");
 const offersPanel = document.querySelector("#offersPanel");
 const offersToggle = document.querySelector("#offersToggle");
 const offersToggleLabel = document.querySelector("#offersToggleLabel");
+const offersSubtitle = document.querySelector("#offersSubtitle");
 const offersContent = document.querySelector("#offersContent");
 const offerPosseValue = document.querySelector("#offerPosseValue");
 const offerFirstValue = document.querySelector("#offerFirstValue");
@@ -20,6 +21,8 @@ const offerAdvancedValue = document.querySelector("#offerAdvancedValue");
 const offerMobileValue = document.querySelector("#offerMobileValue");
 const offerVvnValue = document.querySelector("#offerVvnValue");
 const contactsPanel = document.querySelector("#contactsPanel");
+const resultsOverviewHeader = document.querySelector("#resultsOverviewHeader");
+const metricsSectionHeader = document.querySelector("#metricsSectionHeader");
 const contactManagerValue = document.querySelector("#contactManagerValue");
 const contactEmailValue = document.querySelector("#contactEmailValue");
 const contactMobileValue = document.querySelector("#contactMobileValue");
@@ -182,6 +185,8 @@ function formatGb(value) {
 }
 
 function setPanelsVisible(visible) {
+  resultsOverviewHeader.hidden = !visible;
+  metricsSectionHeader.hidden = !visible;
   companyPanel.hidden = !visible;
   offersPanel.hidden = !visible;
   contactsPanel.hidden = !visible;
@@ -238,14 +243,27 @@ function setOffersExpanded(expanded) {
 }
 
 function renderOffers(offers) {
-  offerPosseValue.textContent = offers?.posse || "-";
-  offerFirstValue.textContent = offers?.primeira_oferta || "-";
-  offerDigitalValue.textContent = offers?.digital || "-";
-  offerBasicFixedValue.textContent = offers?.fixa_basica || "-";
-  offerVivoTechValue.textContent = offers?.vivo_tech || "-";
-  offerAdvancedValue.textContent = offers?.avancada || "-";
-  offerMobileValue.textContent = offers?.movel || "-";
-  offerVvnValue.textContent = offers?.vvn || "-";
+  const entries = [
+    [offerPosseValue, offers?.posse],
+    [offerFirstValue, offers?.primeira_oferta],
+    [offerDigitalValue, offers?.digital],
+    [offerBasicFixedValue, offers?.fixa_basica],
+    [offerVivoTechValue, offers?.vivo_tech],
+    [offerAdvancedValue, offers?.avancada],
+    [offerMobileValue, offers?.movel],
+    [offerVvnValue, offers?.vvn],
+  ];
+  let availableCount = 0;
+  entries.forEach(([element, value]) => {
+    const hasValue = Boolean(value && value !== "-");
+    element.textContent = hasValue ? value : "Sem recomendação";
+    element.closest(".offer-item")?.classList.toggle("is-empty", !hasValue);
+    if (hasValue) availableCount += 1;
+  });
+  offersSubtitle.textContent = availableCount
+    ? `${availableCount} ${availableCount === 1 ? "oportunidade identificada" : "oportunidades identificadas"}`
+    : "Nenhuma oportunidade identificada para este cliente";
+  offersPanel.classList.toggle("has-opportunities", availableCount > 0);
 }
 
 function renderContacts(contacts) {

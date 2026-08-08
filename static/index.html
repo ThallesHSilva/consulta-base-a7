@@ -12,11 +12,11 @@
     />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
-  <body>
+  <body class="consultation-page">
     <div class="app-layout">
       <aside class="sidebar" aria-label="Navegação principal">
         <div class="sidebar-brand">
-          <img class="brand-logo" src="/static/assets/a7connect-logo.jpg" alt="A7 Connect" />
+          <img class="brand-logo" src="/api/branding/logo" alt="Logo da empresa" />
         </div>
 
         <nav class="sidebar-nav">
@@ -55,21 +55,6 @@
             </svg>
             <span>Histórico</span>
           </a>
-          <a class="nav-item" href="#" title="Configurações">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-              <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6V21a2 2 0 1 1-4 0v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1A2 2 0 1 1 4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3a2 2 0 1 1 0-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1A2 2 0 1 1 7.2 4.2l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 .9-1.6V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1A2 2 0 1 1 20 7.2l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6.9h.2a2 2 0 1 1 0 4h-.2a1.7 1.7 0 0 0-1.8.8Z" />
-            </svg>
-            <span>Configurações</span>
-          </a>
-          <a class="nav-item" href="#" title="Ajuda">
-            <svg viewBox="0 0 24 24" aria-hidden="true">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M9.8 9a2.4 2.4 0 0 1 4.5 1.2c0 1.8-2.3 2.1-2.3 3.6" />
-              <path d="M12 17h.01" />
-            </svg>
-            <span>Ajuda</span>
-          </a>
         </nav>
 
         <div class="sidebar-footer">
@@ -91,8 +76,9 @@
         </div>
       </aside>
 
-      <main class="workspace">
-        <header class="page-header">
+      <main class="workspace consultation-workspace">
+        <section class="consultation-hero" aria-labelledby="consultationTitle">
+        <header class="page-header consultation-page-header">
           <button id="sidebarToggle" class="sidebar-toggle" type="button" aria-label="Abrir menu">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="M4 7h16" />
@@ -101,9 +87,9 @@
             </svg>
           </button>
           <div class="title-stack">
-            <span class="eyebrow">Consulta Base</span>
-            <h1>Consulta por CNPJ</h1>
-            <p>Consulte informações completas da base de clientes</p>
+            <span class="eyebrow">Inteligência comercial</span>
+            <h1 id="consultationTitle">Consulta por CNPJ</h1>
+            <p>Transforme os dados da sua base em contexto para uma abordagem mais precisa.</p>
           </div>
           <div class="header-actions">
             <button id="exportPdfButton" class="outline-button" type="button" title="Exportar PDF">
@@ -125,25 +111,18 @@
               <span>Atualizar Dados</span>
             </button>
             <div id="statusBadge" class="status-badge">Carregando</div>
-            <div class="analytics-illustration" aria-hidden="true">
-              <svg viewBox="0 0 120 96">
-                <circle cx="48" cy="38" r="24" />
-                <path d="M66 56 95 85" />
-                <rect x="77" y="54" width="9" height="24" rx="3" />
-                <rect x="92" y="43" width="9" height="35" rx="3" />
-                <rect x="107" y="32" width="9" height="46" rx="3" />
-                <path d="M34 30h28" />
-                <path d="M34 42h18" />
-              </svg>
-            </div>
           </div>
         </header>
 
         <section id="statusPanel" class="status-panel" aria-live="polite"></section>
 
         <section class="search-panel dashboard-card" aria-label="Consulta por CNPJ">
+          <div class="search-panel-copy">
+            <span class="search-panel-kicker">Busca empresarial</span>
+            <h2>Encontre uma empresa em segundos.</h2>
+          </div>
           <form id="searchForm" class="search-form">
-            <label for="cnpjInput">CNPJ</label>
+            <label for="cnpjInput">CNPJ da empresa</label>
             <div class="search-row">
               <div class="search-control">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -173,6 +152,7 @@
             </div>
           </form>
         </section>
+        </section>
 
         <section id="searchMessage" class="message-panel" aria-live="polite" hidden></section>
 
@@ -193,6 +173,13 @@
             </div>
           </dl>
         </section>
+
+        <header id="resultsOverviewHeader" class="results-overview-header" hidden>
+          <div>
+            <span class="eyebrow">Resultado da consulta</span>
+            <h2>Visão geral da empresa</h2>
+          </div>
+        </header>
 
         <section id="companyPanel" class="client-card dashboard-card" aria-label="Cliente" hidden>
           <article class="client-column">
@@ -313,7 +300,7 @@
               </span>
               <span>
                 <span id="offersTitle" class="offers-title">Recomendações</span>
-                <span class="offers-subtitle">Recomendações identificadas para o cliente</span>
+                <span id="offersSubtitle" class="offers-subtitle">Recomendações identificadas para o cliente</span>
               </span>
             </span>
             <span class="offers-toggle-action">
@@ -361,6 +348,13 @@
             </dl>
           </div>
         </section>
+
+        <header id="metricsSectionHeader" class="results-overview-header compact" hidden>
+          <div>
+            <span class="eyebrow">Indicadores</span>
+            <h2>Potencial e relacionamento</h2>
+          </div>
+        </header>
 
         <section id="metricsPanel" class="kpi-grid" aria-label="Indicadores do CNPJ" hidden>
           <article class="kpi-card dashboard-card">
