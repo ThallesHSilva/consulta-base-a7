@@ -34,15 +34,11 @@
         </div>
         <form id="registerForm" class="auth-form">
           <label>
-            <span>Código da empresa</span>
-            <input
-              id="registerOrganization"
-              name="organization_slug"
-              type="text"
-              autocomplete="organization"
-              placeholder="fornecido pelo administrador"
-              required
-            />
+            <span>Empresa</span>
+            <select id="registerOrganization" name="organization_slug" autocomplete="organization" required>
+              <option value="">Carregando empresas...</option>
+            </select>
+            <small class="field-hint">Selecione a empresa que autorizou seu acesso.</small>
           </label>
           <label>
             <span>Nome completo</span>

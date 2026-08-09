@@ -1775,6 +1775,7 @@ svg rect {
 }
 
 .auth-form input,
+.auth-form select,
 .admin-toolbar input,
 .admin-toolbar select {
   width: 100%;
@@ -1792,6 +1793,7 @@ svg rect {
 }
 
 .auth-form input:focus,
+.auth-form select:focus,
 .admin-toolbar input:focus,
 .admin-toolbar select:focus {
   border-color: rgba(108, 60, 240, 0.65);
@@ -1904,6 +1906,28 @@ svg rect {
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.upload-file-list {
+  display: grid;
+  gap: 0.55rem;
+  border: 1px solid rgba(108, 60, 240, 0.16);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  background: #f8f6ff;
+  color: #454a5f;
+  font-size: 0.78rem;
+}
+
+.upload-file-list strong {
+  color: var(--purple-dark);
+}
+
+.upload-file-list ul {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding-left: 1.1rem;
 }
 
 .upload-actions {
@@ -2357,6 +2381,12 @@ svg rect {
     grid-template-columns: 9.5rem minmax(0, 1fr);
     gap: 0.65rem;
   }
+}
+
+.field-hint {
+  color: #7b8195;
+  font-size: 0.75rem;
+  font-weight: 600;
 }
 
 /* Premium login experience */
@@ -4599,7 +4629,7 @@ body.detail-page {
 }
 
 .reports-page .report-filter-panel {
-  grid-template-columns: minmax(260px, 1.25fr) repeat(2, minmax(190px, 0.9fr)) auto;
+  grid-template-columns: minmax(260px, 1.25fr) repeat(3, minmax(170px, 0.9fr)) auto;
   gap: 1.1rem;
   align-items: center;
   padding: 1.1rem 1.25rem;

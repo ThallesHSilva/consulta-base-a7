@@ -25,6 +25,8 @@ const dataUploadForm = document.querySelector("#dataUploadForm");
 const dataUploadButton = document.querySelector("#dataUploadButton");
 const dataUploadMessage = document.querySelector("#dataUploadMessage");
 const dataUploadSummary = document.querySelector("#dataUploadSummary");
+const dataUploadFiles = document.querySelector("#dataUploadFiles");
+const dataUploadFileList = document.querySelector("#dataUploadFileList");
 const brandingLogoForm = document.querySelector("#brandingLogoForm");
 const brandingLogoInput = document.querySelector("#brandingLogoInput");
 const brandingLogoButton = document.querySelector("#brandingLogoButton");
@@ -34,13 +36,31 @@ const sidebarToggleAuth = document.querySelector("#sidebarToggle");
 const registerOrganization = document.querySelector("#registerOrganization");
 const toggleLoginPassword = document.querySelector("#toggleLoginPassword");
 
-if (registerOrganization) {
+async function loadRegistrationOrganizations() {
+  if (!registerOrganization) return;
   const organizationFromUrl = new URLSearchParams(window.location.search).get("empresa");
-  if (organizationFromUrl) {
-    registerOrganization.value = organizationFromUrl;
-    registerOrganization.readOnly = true;
+  try {
+    const response = await fetch("/api/public/organizations", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data.organizations)) throw new Error("Falha ao carregar empresas");
+
+    registerOrganization.replaceChildren(new Option("Selecione sua empresa", ""));
+    data.organizations.forEach((organization) => {
+      registerOrganization.add(new Option(organization.nome, organization.slug));
+    });
+
+    if (organizationFromUrl && [...registerOrganization.options].some((option) => option.value === organizationFromUrl)) {
+      registerOrganization.value = organizationFromUrl;
+      registerOrganization.disabled = true;
+    }
+  } catch {
+    registerOrganization.replaceChildren(new Option("Não foi possível carregar as empresas", ""));
+    registerOrganization.disabled = true;
+    showAuthMessage("Não foi possível carregar a lista de empresas. Atualize a página e tente novamente.");
   }
 }
+
+loadRegistrationOrganizations();
 
 const organizationBrandingSlug = new URLSearchParams(window.location.search).get("empresa")
   || sessionStorage.getItem("organizationSlug")
@@ -127,6 +147,27 @@ function formatBytes(value) {
   return `${amount.toLocaleString("pt-BR", { maximumFractionDigits: unitIndex ? 1 : 0 })} ${units[unitIndex]}`;
 }
 
+function renderSelectedUploadFiles() {
+  if (!dataUploadFileList || !dataUploadFiles) return;
+  const files = [...dataUploadFiles.files];
+  dataUploadFileList.innerHTML = "";
+  if (!files.length) {
+    dataUploadFileList.hidden = true;
+    return;
+  }
+
+  const title = document.createElement("strong");
+  title.textContent = `${files.length} arquivo(s) selecionado(s)`;
+  const list = document.createElement("ul");
+  files.forEach((file) => {
+    const item = document.createElement("li");
+    item.textContent = `${file.name} · ${formatBytes(file.size)}`;
+    list.appendChild(item);
+  });
+  dataUploadFileList.append(title, list);
+  dataUploadFileList.hidden = false;
+}
+
 function formatDate(value) {
   if (!value) return "-";
   const date = new Date(value);
@@ -154,6 +195,7 @@ function statusLabel(status) {
 
 function profileLabel(profile) {
   return {
+    CONTROLE: "Controle",
     ADMIN: "Administrador",
     GESTOR: "Gestor",
     SUPERVISOR: "Supervisor",
@@ -435,63 +477,38 @@ async function runUserAction(userId, action) {
   }
 }
 
+dataUploadFiles?.addEventListener("change", renderSelectedUploadFiles);
+
 dataUploadForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   hideAuthMessage(dataUploadMessage);
   if (dataUploadSummary) dataUploadSummary.hidden = true;
 
-  const selectedInputs = [...dataUploadForm.querySelectorAll("input[type='file']")]
-    .filter((input) => input.files.length > 0);
-  if (!selectedInputs.length) {
+  const files = [...(dataUploadFiles?.files || [])];
+  if (!files.length) {
     showAuthMessage("Selecione ao menos um arquivo CSV para atualizar.", "error", dataUploadMessage);
     return;
   }
 
   setDataUploadLoading(true);
-  const uploaded = [];
   try {
-    for (let index = 0; index < selectedInputs.length; index += 1) {
-      const input = selectedInputs[index];
-      const file = input.files[0];
-      showAuthMessage(
-        `Enviando ${index + 1} de ${selectedInputs.length}: ${file.name} (${formatBytes(file.size)})...`,
-        "success",
-        dataUploadMessage,
-      );
-
-      const formData = new FormData();
-      formData.append(input.name, file, file.name);
-      const response = await fetch("/api/admin/data/upload?refresh=0", {
-        method: "POST",
-        body: formData,
-      });
-      if (response.status === 401) {
-        window.location.href = "/login";
-        return;
-      }
-      const data = await readUploadResponse(response);
-      if (!response.ok || !data.ok) {
-        throw new Error(data.message || uploadErrorMessage(response.status));
-      }
-      uploaded.push(...(data.uploaded || []));
-    }
-
-    showAuthMessage("Arquivos recebidos. Reconstruindo a base...", "success", dataUploadMessage);
-    const refreshResponse = await fetch("/api/data/refresh", {
+    showAuthMessage(`Enviando ${files.length} arquivo(s) e identificando as bases...`, "success", dataUploadMessage);
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file, file.name));
+    const response = await fetch("/api/admin/data/upload?refresh=1", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force: true }),
+      body: formData,
     });
-    if (refreshResponse.status === 401) {
+    if (response.status === 401) {
       window.location.href = "/login";
       return;
     }
-    const data = await readUploadResponse(refreshResponse);
-    if (!refreshResponse.ok && refreshResponse.status !== 503) {
-      throw new Error(data.message || uploadErrorMessage(refreshResponse.status));
+    const data = await readUploadResponse(response);
+    if (!response.ok || !data.ok) {
+      throw new Error(data.message || uploadErrorMessage(response.status));
     }
 
-    const ready = refreshResponse.ok && data.ok;
+    const ready = Boolean(data.ready);
     showAuthMessage(
       ready
         ? (data.message || "Base atualizada com sucesso.")
@@ -500,13 +517,11 @@ dataUploadForm?.addEventListener("submit", async (event) => {
       dataUploadMessage,
     );
     dataUploadForm.reset();
-    renderDataUploadSummary({ ...data, uploaded });
+    renderSelectedUploadFiles();
+    renderDataUploadSummary(data);
   } catch (error) {
-    const savedMessage = uploaded.length
-      ? `${uploaded.length} arquivo(s) já foram salvos. `
-      : "";
     showAuthMessage(
-      `${savedMessage}${error.message || "Não foi possível enviar os arquivos."}`,
+      error.message || "Não foi possível enviar os arquivos.",
       "error",
       dataUploadMessage,
     );

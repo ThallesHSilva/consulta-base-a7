@@ -84,7 +84,8 @@ Observacoes importantes:
 - Use `SESSION_COOKIE_SECURE=auto` para que o cookie de sessao use `Secure` somente quando a requisicao chegar como HTTPS via `X-Forwarded-Proto`.
 - Use `SESSION_COOKIE_SECURE=1` apenas quando todo acesso estiver em HTTPS. Em teste por HTTP direto, use `auto` ou `0`.
 - A sessão de login dura no máximo 2 horas. Um novo login da mesma conta invalida automaticamente a sessão anterior, inclusive em outro dispositivo.
-- O painel administrativo envia os CSVs por `POST /api/admin/data/upload`; o envio exige usuario `ADMIN` e pode ser feito em etapas.
+- O painel administrativo envia os CSVs por `POST /api/admin/data/upload`; o envio exige usuario `ADMIN` e aceita todos os arquivos em uma unica selecao ou em etapas.
+- Os arquivos podem ser enviados com nomes diferentes: a aplicacao identifica cada base pelo nome e, quando necessario, pelas colunas do CSV.
 - O endpoint de upload ignora qualquer identificador de empresa enviado pelo navegador e usa exclusivamente a empresa da sessao autenticada.
 - Logos aceitam PNG, JPG ou WebP, usam limite padrao de 5 MB e tambem ficam isoladas no diretorio da empresa.
 - O primeiro administrador recebe permissao de plataforma para criar e bloquear empresas. Administradores criados para clientes gerenciam somente sua propria empresa.

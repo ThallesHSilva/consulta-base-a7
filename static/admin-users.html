@@ -125,47 +125,19 @@
             <span class="badge neutral">Acesso administrador</span>
           </div>
           <p class="team-description">
-            As bases ficam armazenadas somente no servidor e podem ser enviadas juntas ou em etapas.
+            Selecione todos os CSVs de uma vez. O sistema identifica automaticamente cada base pelo nome
+            e pelas colunas do arquivo, sem precisar escolher o tipo manualmente.
             MAPA PARQUE, PARQUE MÓVEL e PARQUE FIXA são obrigatórias para liberar as consultas.
           </p>
           <form id="dataUploadForm" class="data-upload-form" enctype="multipart/form-data">
             <div class="upload-grid">
               <label class="file-upload">
-                <span>MAPA PARQUE.csv</span>
-                <small>Obrigatória</small>
-                <input id="uploadMapaParque" name="mapa_parque" type="file" accept=".csv,text/csv" />
-              </label>
-              <label class="file-upload">
-                <span>PARQUE MOVEL.csv</span>
-                <small>Obrigatória</small>
-                <input id="uploadParqueMovel" name="parque_movel" type="file" accept=".csv,text/csv" />
-              </label>
-              <label class="file-upload">
-                <span>PARQUE FIXA.csv</span>
-                <small>Obrigatória</small>
-                <input id="uploadParqueFixa" name="parque_fixa" type="file" accept=".csv,text/csv" />
-              </label>
-              <label class="file-upload">
-                <span>RECOMENDAÇÃO FIXA.csv</span>
-                <small>Opcional</small>
-                <input
-                  id="uploadRecomendacaoFixa"
-                  name="recomendacao_fixa"
-                  type="file"
-                  accept=".csv,text/csv"
-                />
-              </label>
-              <label class="file-upload">
-                <span>RECOMENDAÇÃO MÓVEL.csv</span>
-                <small>Opcional</small>
-                <input
-                  id="uploadRecomendacaoMovel"
-                  name="recomendacao_movel"
-                  type="file"
-                  accept=".csv,text/csv"
-                />
+                <span>Selecionar bases CSV</span>
+                <small>Obrigatórias e opcionais · seleção múltipla</small>
+                <input id="dataUploadFiles" name="files" type="file" accept=".csv,text/csv" multiple />
               </label>
             </div>
+            <div id="dataUploadFileList" class="upload-file-list" aria-live="polite" hidden></div>
             <div class="upload-actions">
               <p id="dataUploadMessage" class="auth-message" aria-live="polite" hidden></p>
               <button id="dataUploadButton" class="gradient-button" type="submit">

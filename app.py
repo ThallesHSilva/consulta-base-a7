@@ -14,6 +14,7 @@ import smtplib
 import time
 import textwrap
 import threading
+import unicodedata
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
@@ -50,8 +51,8 @@ EMAIL_VERIFICATION_EMAIL_LIMIT = 3
 EMAIL_VERIFICATION_IP_LIMIT = 10
 PASSWORD_HASH_ITERATIONS = 260_000
 AUTH_STATUSES = {"PENDENTE_APROVACAO", "ATIVO", "BLOQUEADO", "CANCELADO"}
-AUTH_PROFILES = {"ADMIN", "GESTOR", "SUPERVISOR", "USUARIO"}
-REPORT_PROFILES = {"ADMIN", "GESTOR", "SUPERVISOR"}
+AUTH_PROFILES = {"CONTROLE", "ADMIN", "GESTOR", "SUPERVISOR", "USUARIO"}
+REPORT_PROFILES = {"CONTROLE", "ADMIN", "GESTOR", "SUPERVISOR"}
 TRUE_ENV_VALUES = {"1", "true", "sim", "yes", "on"}
 GENERIC_RESET_MESSAGE = (
     "Se o e-mail estiver cadastrado, enviaremos as instruções para redefinição de senha."
@@ -316,6 +317,15 @@ def public_user(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def is_control_user(user: dict[str, Any] | None) -> bool:
+    """Return whether the user has global control access.
+
+    ``is_platform_admin`` is retained as a backward-compatible marker for
+    installations created before the CONTROLE profile was introduced.
+    """
+    return bool(user and (user.get("is_platform_admin") or user.get("perfil") == "CONTROLE"))
+
+
 def relative_display(path: Path) -> str:
     return path.relative_to(ROOT).as_posix()
 
@@ -544,7 +554,7 @@ def detect_upload_encoding(content: bytes) -> str:
         return "cp1252"
 
 
-def validate_uploaded_csv_headers(content: bytes, data_file: dict[str, Any]) -> list[str]:
+def uploaded_csv_headers(content: bytes) -> list[str]:
     if not content:
         raise ValueError("O arquivo enviado está vazio.")
 
@@ -552,9 +562,13 @@ def validate_uploaded_csv_headers(content: bytes, data_file: dict[str, Any]) -> 
     text = content[:65536].decode(encoding, errors="replace")
     reader = csv.reader(io.StringIO(text), delimiter=";")
     try:
-        headers = sanitize_headers(next(reader))
+        return sanitize_headers(next(reader))
     except StopIteration as exc:
         raise ValueError("O arquivo enviado está vazio.") from exc
+
+
+def validate_uploaded_csv_headers(content: bytes, data_file: dict[str, Any]) -> list[str]:
+    headers = uploaded_csv_headers(content)
 
     expected_columns = data_file["cnpj_columns"]
     if not any(column in headers for column in expected_columns):
@@ -563,6 +577,56 @@ def validate_uploaded_csv_headers(content: bytes, data_file: dict[str, Any]) -> 
             f"O arquivo {data_file['label']} deve conter a coluna {expected}."
         )
     return headers
+
+
+def normalize_upload_identifier(value: Any) -> str:
+    normalized = unicodedata.normalize("NFKD", clean_cell(value))
+    normalized = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]+", "", normalized.lower())
+
+
+def identify_uploaded_data_file(
+    part: dict[str, Any],
+    data_file_by_key: dict[str, dict[str, Any]],
+) -> str:
+    explicit_key = clean_cell(part.get("name"))
+    if explicit_key in data_file_by_key:
+        return explicit_key
+
+    filename = clean_cell(part.get("filename"))
+    identifier = normalize_upload_identifier(Path(filename).stem)
+    if "mapa" in identifier and "parque" in identifier:
+        return "mapa_parque"
+    if "recomend" in identifier or "oferta" in identifier or "upgrade" in identifier:
+        if "mov" in identifier:
+            return "recomendacao_movel"
+        if "fix" in identifier:
+            return "recomendacao_fixa"
+    if "parque" in identifier or "base" in identifier or "mov" in identifier or "fix" in identifier:
+        if "mov" in identifier:
+            return "parque_movel"
+        if "fix" in identifier:
+            return "parque_fixa"
+
+    headers = uploaded_csv_headers(part.get("content", b""))
+    header_set = set(headers)
+    if "NR_CNPJ" in header_set:
+        return "mapa_parque"
+    if "CNPJ_CLIENTE" in header_set:
+        return "parque_movel"
+    if "NR_DOCUMENTO" in header_set:
+        return "recomendacao_movel"
+    if "DOCUMENTO" in header_set:
+        has_client_column = any(column in header_set for column in ("NM_CLIENTE", "CLIENTE"))
+        return "parque_fixa" if has_client_column else "recomendacao_fixa"
+
+    expected_names = ", ".join(
+        data_file["label"] for data_file in data_file_by_key.values()
+    )
+    raise ValueError(
+        f"Não foi possível identificar o arquivo '{filename}'. "
+        f"Use o nome da base ou confira as colunas do CSV ({expected_names})."
+    )
 
 
 def parse_multipart_form(content_type: str, body: bytes) -> list[dict[str, Any]]:
@@ -597,23 +661,30 @@ def save_uploaded_data_files(
 ) -> tuple[HTTPStatus, dict[str, Any]]:
     data_file_by_key = organization_data_file_by_key(organization_id)
     selected_parts: dict[str, dict[str, Any]] = {}
-    unknown_fields: list[str] = []
 
     for part in parts:
-        key = part["name"]
-        if key not in data_file_by_key:
-            unknown_fields.append(key)
-            continue
+        filename = clean_cell(part.get("filename"))
+        if not filename.lower().endswith(".csv"):
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {"ok": False, "message": f"O arquivo {filename or 'enviado'} deve estar em CSV."},
+            )
+        try:
+            key = identify_uploaded_data_file(part, data_file_by_key)
+        except ValueError as error:
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "message": str(error)}
+        if key in selected_parts:
+            return (
+                HTTPStatus.BAD_REQUEST,
+                {
+                    "ok": False,
+                    "message": (
+                        f"Mais de um arquivo foi identificado como "
+                        f"{data_file_by_key[key]['label']}. Envie somente uma versão dessa base."
+                    ),
+                },
+            )
         selected_parts[key] = part
-
-    if unknown_fields:
-        return (
-            HTTPStatus.BAD_REQUEST,
-            {
-                "ok": False,
-                "message": f"Campo de arquivo inválido: {', '.join(sorted(unknown_fields))}.",
-            },
-        )
 
     if not selected_parts:
         return (
@@ -2226,11 +2297,37 @@ def list_organizations() -> list[dict[str, Any]]:
     ]
 
 
+def list_public_organizations() -> list[dict[str, str]]:
+    """Return only active organizations that can receive registration requests."""
+    with open_auth_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT nome, slug
+            FROM organizations
+            WHERE status = 'ATIVA'
+            ORDER BY nome COLLATE NOCASE
+            """
+        ).fetchall()
+    return [{"nome": row["nome"], "slug": row["slug"]} for row in rows]
+
+
+def list_report_organizations() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": item["id"],
+            "nome": item["nome"],
+            "slug": item["slug"],
+            "status": item["status"],
+        }
+        for item in list_organizations()
+    ]
+
+
 def create_organization(
     platform_user: dict[str, Any],
     data: dict[str, Any],
 ) -> tuple[HTTPStatus, dict[str, Any]]:
-    if not platform_user.get("is_platform_admin"):
+    if not is_control_user(platform_user):
         return HTTPStatus.FORBIDDEN, {"ok": False, "message": "Acesso restrito ao administrador da plataforma."}
 
     name = clean_cell(data.get("nome"))
@@ -2305,7 +2402,7 @@ def update_organization_status(
     organization_id: int,
     status: Any,
 ) -> tuple[HTTPStatus, dict[str, Any]]:
-    if not platform_user.get("is_platform_admin"):
+    if not is_control_user(platform_user):
         return HTTPStatus.FORBIDDEN, {"ok": False, "message": "Acesso restrito ao administrador da plataforma."}
     normalized_status = clean_cell(status).upper()
     if normalized_status not in {"ATIVA", "BLOQUEADA"}:
@@ -2727,6 +2824,11 @@ def assign_user_profile(
     profile: Any,
 ) -> tuple[HTTPStatus, dict[str, Any]]:
     normalized_profile = clean_cell(profile).upper()
+    if normalized_profile == "CONTROLE" and not is_control_user(admin_user):
+        return HTTPStatus.FORBIDDEN, {
+            "ok": False,
+            "message": "Somente o perfil Controle pode conceder acesso global.",
+        }
     if normalized_profile not in AUTH_PROFILES:
         return HTTPStatus.BAD_REQUEST, {"ok": False, "message": "Perfil inválido."}
 
@@ -2775,6 +2877,7 @@ def assign_user_profile(
         conn.commit()
 
     labels = {
+        "CONTROLE": "Controle",
         "ADMIN": "Administrador",
         "GESTOR": "Gestor",
         "SUPERVISOR": "Supervisor",
@@ -2925,6 +3028,7 @@ def usage_ranking_report(
     filter_team_id: int | None = None,
     filter_user_id: int | None = None,
     organization_id: int | None = None,
+    organization_options: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     zone = app_zoneinfo()
     now_utc = utc_now()
@@ -3115,6 +3219,11 @@ def usage_ranking_report(
     for client in top_clients:
         client["usuarios"] = len(client["usuarios"])
 
+    selected_organization = next(
+        (item for item in (organization_options or []) if item["id"] == organization_id),
+        None,
+    )
+
     return {
         "ok": True,
         "scope": {
@@ -3133,6 +3242,10 @@ def usage_ranking_report(
             "selected_team_name": selected_team["nome"] if selected_team else "",
             "selected_user_id": filter_user_id,
             "selected_user_name": selected_user["nome_completo"] if selected_user else "",
+            "can_filter_organization": organization_options is not None,
+            "organizations": organization_options or [],
+            "selected_organization_id": organization_id,
+            "selected_organization_name": selected_organization["nome"] if selected_organization else "",
         },
         "summary": {
             "usuarios": len(items),
@@ -3789,13 +3902,13 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         if not user:
             self.redirect("/login")
             return None
-        if admin and user["perfil"] != "ADMIN":
+        if admin and (user["perfil"] != "ADMIN" or is_control_user(user)):
             self.send_error(HTTPStatus.FORBIDDEN)
             return None
         if reports and user["perfil"] not in REPORT_PROFILES:
             self.send_error(HTTPStatus.FORBIDDEN)
             return None
-        if platform and not user.get("is_platform_admin"):
+        if platform and not is_control_user(user):
             self.send_error(HTTPStatus.FORBIDDEN)
             return None
         return user
@@ -3813,7 +3926,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 status=HTTPStatus.UNAUTHORIZED,
             )
             return None
-        if admin and user["perfil"] != "ADMIN":
+        if admin and (user["perfil"] != "ADMIN" or is_control_user(user)):
             self.send_json(
                 {"ok": False, "message": "Acesso restrito ao administrador."},
                 status=HTTPStatus.FORBIDDEN,
@@ -3825,7 +3938,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 status=HTTPStatus.FORBIDDEN,
             )
             return None
-        if platform and not user.get("is_platform_admin"):
+        if platform and not is_control_user(user):
             self.send_json(
                 {"ok": False, "message": "Acesso restrito ao administrador da plataforma."},
                 status=HTTPStatus.FORBIDDEN,
@@ -3934,6 +4047,10 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 self.send_image(fallback.read_bytes(), "image/jpeg")
             return
 
+        if parsed.path == "/api/public/organizations":
+            self.send_json({"ok": True, "organizations": list_public_organizations()})
+            return
+
         if parsed.path == "/api/auth/me":
             user = self.get_current_user()
             if not user:
@@ -3981,14 +4098,29 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             try:
                 raw_team_filter = params.get("team_id", [""])[0]
                 raw_user_filter = params.get("user_id", [""])[0]
+                raw_organization_filter = params.get("organization_id", [""])[0]
                 filter_team_id = int(raw_team_filter) if raw_team_filter else None
                 filter_user_id = int(raw_user_filter) if raw_user_filter else None
+                filter_organization_id = int(raw_organization_filter) if raw_organization_filter else None
             except (TypeError, ValueError):
                 self.send_json(
-                    {"ok": False, "message": "Filtro de equipe ou usuário inválido."},
+                    {"ok": False, "message": "Filtro de empresa, equipe ou usuário inválido."},
                     status=HTTPStatus.BAD_REQUEST,
                 )
                 return
+            organization_options = list_report_organizations() if is_control_user(user) else None
+            if organization_options is None:
+                report_organization_id = user["organization_id"]
+            else:
+                valid_organization_ids = {item["id"] for item in organization_options}
+                if filter_organization_id is not None and filter_organization_id not in valid_organization_ids:
+                    self.send_json(
+                        {"ok": False, "message": "Empresa inválida para o relatório."},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                report_organization_id = filter_organization_id
+
             if user["perfil"] == "SUPERVISOR" and user["equipe_id"] is None:
                 self.send_json(
                     {
@@ -4005,7 +4137,8 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                         team_name=user["equipe_nome"],
                         filter_team_id=filter_team_id,
                         filter_user_id=filter_user_id,
-                        organization_id=user["organization_id"],
+                        organization_id=report_organization_id,
+                        organization_options=organization_options,
                     )
                 )
                 return
@@ -4018,7 +4151,8 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                         supervisors=scope["supervisors"],
                         filter_team_id=filter_team_id,
                         filter_user_id=filter_user_id,
-                        organization_id=user["organization_id"],
+                        organization_id=report_organization_id,
+                        organization_options=organization_options,
                     )
                 )
                 return
@@ -4026,7 +4160,8 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 usage_ranking_report(
                     filter_team_id=filter_team_id,
                     filter_user_id=filter_user_id,
-                    organization_id=user["organization_id"],
+                    organization_id=report_organization_id,
+                    organization_options=organization_options,
                 )
             )
             return
