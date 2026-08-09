@@ -3,6 +3,8 @@ const reportsMessage = document.querySelector("#reportsMessage");
 const reportsBody = document.querySelector("#reportsBody");
 const reportsGeneratedAt = document.querySelector("#reportsGeneratedAt");
 const reportsScopeText = document.querySelector("#reportsScopeText");
+const reportsOrganizationFilterControl = document.querySelector("#reportsOrganizationFilterControl");
+const reportsOrganizationFilter = document.querySelector("#reportsOrganizationFilter");
 const reportsTeamFilter = document.querySelector("#reportsTeamFilter");
 const reportsUserFilter = document.querySelector("#reportsUserFilter");
 const reportsClearFiltersButton = document.querySelector("#reportsClearFiltersButton");
@@ -62,7 +64,7 @@ function hideReportsMessage() {
 }
 
 function setReportsLoading(loading) {
-  [reportsRefreshButton, reportsTeamFilter, reportsUserFilter, reportsClearFiltersButton]
+  [reportsRefreshButton, reportsOrganizationFilter, reportsTeamFilter, reportsUserFilter, reportsClearFiltersButton]
     .filter(Boolean)
     .forEach((control) => {
       control.disabled = loading;
@@ -92,6 +94,19 @@ function renderReportFilters(filters = {}) {
   };
   const selectedTeamId = filters.selected_team_id == null ? "" : String(filters.selected_team_id);
   const selectedUserId = filters.selected_user_id == null ? "" : String(filters.selected_user_id);
+  if (reportsOrganizationFilter && reportsOrganizationFilterControl) {
+    const canFilterOrganization = Boolean(filters.can_filter_organization);
+    reportsOrganizationFilterControl.hidden = !canFilterOrganization;
+    reportsOrganizationFilter.innerHTML = "";
+    reportsOrganizationFilter.add(new Option("Todas as empresas", ""));
+    (filters.organizations || []).forEach((organization) => {
+      const statusSuffix = organization.status === "ATIVA" ? "" : ` · ${String(organization.status || "").toLowerCase()}`;
+      reportsOrganizationFilter.add(new Option(`${organization.nome}${statusSuffix}`, String(organization.id)));
+    });
+    reportsOrganizationFilter.value = filters.selected_organization_id == null
+      ? ""
+      : String(filters.selected_organization_id);
+  }
   if (reportsTeamFilter) {
     reportsTeamFilter.innerHTML = "";
     reportsTeamFilter.add(new Option("Todas as equipes", ""));
@@ -192,6 +207,7 @@ function renderReport(data) {
     const activeFilters = [];
     if (filters.selected_team_name) activeFilters.push(`equipe ${filters.selected_team_name}`);
     if (filters.selected_user_name) activeFilters.push(`usuário ${filters.selected_user_name}`);
+    if (filters.selected_organization_name) activeFilters.push(`empresa ${filters.selected_organization_name}`);
     reportsScopeText.textContent = activeFilters.length
       ? `${scopeMessage} Filtro ativo: ${activeFilters.join(" e ")}.`
       : scopeMessage;
@@ -258,6 +274,7 @@ async function loadReports() {
   setReportsLoading(true);
   try {
     const params = new URLSearchParams();
+    if (reportsOrganizationFilter?.value) params.set("organization_id", reportsOrganizationFilter.value);
     if (reportsTeamFilter?.value) params.set("team_id", reportsTeamFilter.value);
     if (reportsUserFilter?.value) params.set("user_id", reportsUserFilter.value);
     const query = params.toString();
@@ -280,12 +297,18 @@ async function loadReports() {
 }
 
 reportsRefreshButton?.addEventListener("click", loadReports);
+reportsOrganizationFilter?.addEventListener("change", () => {
+  if (reportsTeamFilter) reportsTeamFilter.value = "";
+  renderUserFilterOptions("", "");
+  loadReports();
+});
 reportsTeamFilter?.addEventListener("change", () => {
   renderUserFilterOptions(reportsTeamFilter.value, "");
   loadReports();
 });
 reportsUserFilter?.addEventListener("change", loadReports);
 reportsClearFiltersButton?.addEventListener("click", () => {
+  if (reportsOrganizationFilter) reportsOrganizationFilter.value = "";
   if (reportsTeamFilter) reportsTeamFilter.value = "";
   renderUserFilterOptions("", "");
   loadReports();

@@ -53,23 +53,26 @@
 
     if (userName) userName.textContent = user.nome_completo || "Usuário";
     const roleLabels = {
+      CONTROLE: "Controle",
       ADMIN: "Administrador",
       GESTOR: "Gestor",
       SUPERVISOR: "Supervisor",
       USUARIO: "Usuário",
     };
     if (userRole) {
-      const role = roleLabels[user.perfil] || user.perfil || "Perfil";
-      userRole.textContent = user.organization_name ? `${role} · ${user.organization_name}` : role;
+      const isControl = user.perfil === "CONTROLE" || user.is_platform_admin;
+      const role = isControl ? "Controle" : (roleLabels[user.perfil] || user.perfil || "Perfil");
+      userRole.textContent = isControl ? role : (user.organization_name ? `${role} · ${user.organization_name}` : role);
     }
     if (userInitials) userInitials.textContent = initials(user.nome_completo);
     document.querySelectorAll(".brand-logo").forEach((logo) => {
       logo.src = `/api/branding/logo?v=${Date.now()}`;
       logo.alt = user.organization_name ? `Logo ${user.organization_name}` : "Logo da empresa";
     });
-    if (adminNavItem) adminNavItem.hidden = user.perfil !== "ADMIN";
-    if (adminReportsNavItem) adminReportsNavItem.hidden = !["ADMIN", "GESTOR", "SUPERVISOR"].includes(user.perfil);
-    if (sidebarNav && user.is_platform_admin && !document.querySelector("#platformOrganizationsNavItem")) {
+    const isControl = user.perfil === "CONTROLE" || user.is_platform_admin;
+    if (adminNavItem) adminNavItem.hidden = user.perfil !== "ADMIN" || isControl;
+    if (adminReportsNavItem) adminReportsNavItem.hidden = !["CONTROLE", "ADMIN", "GESTOR", "SUPERVISOR"].includes(user.perfil) && !isControl;
+    if (sidebarNav && isControl && !document.querySelector("#platformOrganizationsNavItem")) {
       const link = document.createElement("a");
       link.id = "platformOrganizationsNavItem";
       link.className = "nav-item";

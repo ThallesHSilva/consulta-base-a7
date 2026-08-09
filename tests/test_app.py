@@ -689,6 +689,60 @@ class DataUploadTest(unittest.TestCase):
         self.assertEqual(parts[0]["filename"], "MAPA PARQUE.csv")
         self.assertIn(b"NR_CNPJ", parts[0]["content"])
 
+    def test_identifies_csv_by_filename_and_headers(self):
+        self.assertEqual(
+            app.identify_uploaded_data_file(
+                {"name": "files", "filename": "clientes_movel.csv", "content": b""},
+                app.DATA_FILE_BY_KEY,
+            ),
+            "parque_movel",
+        )
+        self.assertEqual(
+            app.identify_uploaded_data_file(
+                {
+                    "name": "files",
+                    "filename": "arquivo-sem-nome.csv",
+                    "content": b"NR_CNPJ;NM_CLIENTE\n12;Cliente\n",
+                },
+                app.DATA_FILE_BY_KEY,
+            ),
+            "mapa_parque",
+        )
+
+    def test_uploads_multiple_auto_detected_files_in_one_operation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            original_root = app.ROOT
+            original_data_dir = app.DATA_DIR
+            original_data_files = app.DATA_FILES
+            original_file_by_key = app.DATA_FILE_BY_KEY
+            try:
+                app.ROOT = Path(temp_dir)
+                app.DATA_DIR = app.ROOT / "data"
+                app.DATA_FILES = [
+                    {**item, "path": app.DATA_DIR / Path(item["path"]).name}
+                    for item in original_data_files
+                ]
+                app.DATA_FILE_BY_KEY = {item["key"]: item for item in app.DATA_FILES}
+                parts = [
+                    {"name": "files", "filename": "clientes_mapa.csv", "content": b"NR_CNPJ;NM_CLIENTE\n12;A\n"},
+                    {"name": "files", "filename": "clientes_movel.csv", "content": b"CNPJ_CLIENTE;CLIENTE\n12;B\n"},
+                    {"name": "files", "filename": "clientes_fixa.csv", "content": b"DOCUMENTO;CLIENTE\n12;C\n"},
+                ]
+                status, response = app.save_uploaded_data_files(parts, refresh_after_upload=False)
+                saved = {Path(item["file_name"]).name for item in response["uploaded"]}
+            finally:
+                app.ROOT = original_root
+                app.DATA_DIR = original_data_dir
+                app.DATA_FILES = original_data_files
+                app.DATA_FILE_BY_KEY = original_file_by_key
+
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertTrue(response["ok"])
+        self.assertEqual(
+            saved,
+            {"MAPA PARQUE.csv", "PARQUE MOVEL.csv", "PARQUE FIXA.csv"},
+        )
+
 
 class SearchHistoryTest(unittest.TestCase):
     def setUp(self):
