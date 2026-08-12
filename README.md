@@ -87,6 +87,7 @@ Observacoes importantes:
 - O painel administrativo envia os CSVs por `POST /api/admin/data/upload`; o envio exige usuario `ADMIN` e aceita todos os arquivos em uma unica selecao ou em etapas.
 - Os arquivos podem ser enviados com nomes diferentes: a aplicacao identifica cada base pelo nome e, quando necessario, pelas colunas do CSV.
 - O endpoint de upload ignora qualquer identificador de empresa enviado pelo navegador e usa exclusivamente a empresa da sessao autenticada.
+- O perfil Controle pode abrir o painel administrativo global e selecionar a empresa que deseja administrar; administradores comuns continuam limitados a propria empresa.
 - Logos aceitam PNG, JPG ou WebP, usam limite padrao de 5 MB e tambem ficam isoladas no diretorio da empresa.
 - O primeiro administrador recebe permissao de plataforma para criar e bloquear empresas. Administradores criados para clientes gerenciam somente sua propria empresa.
 - Os CSVs de `data/` são ignorados pelo Git e pelo contexto de build do Docker. A imagem não contém bases operacionais.

@@ -70,7 +70,7 @@
       logo.alt = user.organization_name ? `Logo ${user.organization_name}` : "Logo da empresa";
     });
     const isControl = user.perfil === "CONTROLE" || user.is_platform_admin;
-    if (adminNavItem) adminNavItem.hidden = user.perfil !== "ADMIN" || isControl;
+    if (adminNavItem) adminNavItem.hidden = user.perfil !== "ADMIN" && !isControl;
     if (adminReportsNavItem) adminReportsNavItem.hidden = !["CONTROLE", "ADMIN", "GESTOR", "SUPERVISOR"].includes(user.perfil) && !isControl;
     if (sidebarNav && isControl && !document.querySelector("#platformOrganizationsNavItem")) {
       const link = document.createElement("a");

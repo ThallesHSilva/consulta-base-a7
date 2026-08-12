@@ -2218,9 +2218,13 @@ def save_organization_logo(
             JOIN users ON users.id = ?
             WHERE organizations.id = ?
               AND organizations.status = 'ATIVA'
-              AND users.organization_id = organizations.id
               AND users.status = 'ATIVO'
-              AND users.perfil = 'ADMIN'
+              AND (
+                    users.organization_id = organizations.id
+                    AND users.perfil = 'ADMIN'
+                    OR users.perfil = 'CONTROLE'
+                    OR users.is_platform_admin = 1
+              )
             """,
             (uploaded_by, int(organization_id)),
         ).fetchone()
@@ -2259,7 +2263,7 @@ def save_organization_logo(
     return HTTPStatus.OK, {
         "ok": True,
         "message": "Logo da empresa atualizada com sucesso.",
-        "logo_url": f"/api/branding/logo?v={time.time_ns()}",
+        "logo_url": f"/api/branding/logo?organization_id={int(organization_id)}&v={time.time_ns()}",
         "content_type": content_type,
     }
 
@@ -2321,6 +2325,37 @@ def list_report_organizations() -> list[dict[str, Any]]:
         }
         for item in list_organizations()
     ]
+
+
+def resolve_admin_organization_id(
+    admin_user: dict[str, Any],
+    requested_organization_id: Any = None,
+) -> tuple[HTTPStatus, int | None, dict[str, Any] | None]:
+    """Resolve the company an admin operation may manage.
+
+    Company administrators are always pinned to their own organization. The
+    global Controle profile may select any existing organization explicitly.
+    """
+    own_organization_id = admin_user.get("organization_id")
+    if not is_control_user(admin_user):
+        return HTTPStatus.OK, int(own_organization_id), None
+
+    raw_id = requested_organization_id
+    if raw_id in (None, ""):
+        return HTTPStatus.OK, int(own_organization_id), None
+    try:
+        organization_id = int(raw_id)
+    except (TypeError, ValueError):
+        return HTTPStatus.BAD_REQUEST, None, {"ok": False, "message": "Empresa inválida."}
+
+    with open_auth_db() as conn:
+        organization = conn.execute(
+            "SELECT id, nome, slug, status FROM organizations WHERE id = ?",
+            (organization_id,),
+        ).fetchone()
+    if not organization:
+        return HTTPStatus.NOT_FOUND, None, {"ok": False, "message": "Empresa não encontrada."}
+    return HTTPStatus.OK, organization_id, None
 
 
 def create_organization(
@@ -3902,7 +3937,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
         if not user:
             self.redirect("/login")
             return None
-        if admin and (user["perfil"] != "ADMIN" or is_control_user(user)):
+        if admin and user["perfil"] != "ADMIN" and not is_control_user(user):
             self.send_error(HTTPStatus.FORBIDDEN)
             return None
         if reports and user["perfil"] not in REPORT_PROFILES:
@@ -3926,7 +3961,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 status=HTTPStatus.UNAUTHORIZED,
             )
             return None
-        if admin and (user["perfil"] != "ADMIN" or is_control_user(user)):
+        if admin and user["perfil"] != "ADMIN" and not is_control_user(user):
             self.send_json(
                 {"ok": False, "message": "Acesso restrito ao administrador."},
                 status=HTTPStatus.FORBIDDEN,
@@ -4024,13 +4059,18 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
 
         if parsed.path == "/api/branding/logo":
             current_user = self.get_current_user()
-            organization_id = (
-                int(current_user["organization_id"])
-                if current_user
-                else None
-            )
+            organization_id = int(current_user["organization_id"]) if current_user else None
+            params = parse_qs(parsed.query)
+            if current_user and is_control_user(current_user) and params.get("organization_id", [""])[0]:
+                status, scoped_organization_id, error = resolve_admin_organization_id(
+                    current_user,
+                    params.get("organization_id", [""])[0],
+                )
+                if error:
+                    self.send_json(error, status=status)
+                    return
+                organization_id = scoped_organization_id
             if organization_id is None:
-                params = parse_qs(parsed.query)
                 organization_slug = normalize_organization_slug(
                     params.get("empresa", [""])[0]
                 )
@@ -4064,15 +4104,23 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             if not admin_user:
                 return
             params = parse_qs(parsed.query)
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                params.get("organization_id", [""])[0],
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
+                return
             self.send_json(
                 {
                     "ok": True,
+                    "organization_id": organization_id,
                     "users": list_users(
                         params.get("search", [""])[0],
                         params.get("status", [""])[0],
-                        admin_user["organization_id"],
+                        organization_id,
                     ),
-                    "managers": list_managers(admin_user["organization_id"]),
+                    "managers": list_managers(organization_id),
                 }
             )
             return
@@ -4081,13 +4129,28 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
                 return
-            self.send_json({"ok": True, "teams": list_teams(admin_user["organization_id"])})
+            params = parse_qs(parsed.query)
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                params.get("organization_id", [""])[0],
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
+                return
+            self.send_json({"ok": True, "organization_id": organization_id, "teams": list_teams(organization_id)})
             return
 
         if parsed.path == "/api/platform/organizations":
-            if not self.require_api_user(platform=True):
+            platform_user = self.require_api_user(platform=True)
+            if not platform_user:
                 return
-            self.send_json({"ok": True, "organizations": list_organizations()})
+            self.send_json(
+                {
+                    "ok": True,
+                    "organizations": list_organizations(),
+                    "current_organization_id": platform_user["organization_id"],
+                }
+            )
             return
 
         if parsed.path == "/api/admin/reports/usage":
@@ -4266,13 +4329,21 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
                 return
+            requested_organization_id = parse_qs(parsed.query).get("organization_id", [""])[0]
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                requested_organization_id,
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
+                return
             status, message, body = self.read_limited_body(MAX_LOGO_UPLOAD_BYTES)
             if body is None:
                 self.send_json({"ok": False, "message": message}, status=status)
                 return
-            with organization_data_lock(admin_user["organization_id"]):
+            with organization_data_lock(organization_id):
                 response_status, response = save_organization_logo(
-                    admin_user["organization_id"],
+                    organization_id,
                     admin_user["id"],
                     body,
                     self.headers.get("Content-Type", ""),
@@ -4284,6 +4355,14 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
                 return
+            params = parse_qs(parsed.query)
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                params.get("organization_id", [""])[0],
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
+                return
 
             status, message, body = self.read_limited_body(MAX_UPLOAD_BYTES)
             if body is None:
@@ -4292,14 +4371,13 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
 
             try:
                 parts = parse_multipart_form(self.headers.get("Content-Type", ""), body)
-                params = parse_qs(parsed.query)
                 refresh_value = clean_cell(params.get("refresh", ["1"])[0]).lower()
                 refresh_after_upload = refresh_value not in {"0", "false", "nao", "não"}
-                with organization_data_lock(admin_user["organization_id"]):
+                with organization_data_lock(organization_id):
                     response_status, response = save_uploaded_data_files(
                         parts,
                         refresh_after_upload=refresh_after_upload,
-                        organization_id=admin_user["organization_id"],
+                        organization_id=organization_id,
                         uploaded_by=admin_user["id"],
                     )
             except ValueError as error:
@@ -4391,10 +4469,17 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
                 return
-            with organization_data_lock(admin_user["organization_id"]):
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                data.get("organization_id"),
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
+                return
+            with organization_data_lock(organization_id):
                 state = refresh_data(
                     force_rebuild=bool(data.get("force")),
-                    organization_id=admin_user["organization_id"],
+                    organization_id=organization_id,
                 )
             response_status = HTTPStatus.OK if state.get("ready") else HTTPStatus.SERVICE_UNAVAILABLE
             self.send_json(
@@ -4414,6 +4499,14 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
                 return
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                data.get("organization_id"),
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
+                return
+            scoped_admin_user = {**admin_user, "organization_id": organization_id}
             try:
                 user_id = int(data.get("user_id"))
             except (TypeError, ValueError):
@@ -4423,7 +4516,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                 )
                 return
             status, response = update_user_status(
-                admin_user,
+                scoped_admin_user,
                 user_id,
                 str(data.get("action") or ""),
             )
@@ -4435,7 +4528,14 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
                 return
-            status, response = create_team(data.get("nome"), admin_user["organization_id"])
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                data.get("organization_id"),
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
+                return
+            status, response = create_team(data.get("nome"), organization_id)
             self.send_json(response, status=status)
             return
 
@@ -4443,6 +4543,13 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             data = self.read_json_body()
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
+                return
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                data.get("organization_id"),
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
                 return
             try:
                 user_id = int(data.get("user_id"))
@@ -4454,7 +4561,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             status, response = assign_user_team(
                 user_id,
                 team_id,
-                admin_user["organization_id"],
+                organization_id,
             )
             self.send_json(response, status=status)
             return
@@ -4464,6 +4571,14 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
                 return
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                data.get("organization_id"),
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
+                return
+            scoped_admin_user = {**admin_user, "organization_id": organization_id}
             try:
                 user_id = int(data.get("user_id"))
             except (TypeError, ValueError):
@@ -4472,7 +4587,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
                     status=HTTPStatus.BAD_REQUEST,
                 )
                 return
-            status, response = assign_user_profile(admin_user, user_id, data.get("perfil"))
+            status, response = assign_user_profile(scoped_admin_user, user_id, data.get("perfil"))
             self.send_json(response, status=status)
             return
 
@@ -4480,6 +4595,13 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             data = self.read_json_body()
             admin_user = self.require_api_user(admin=True)
             if not admin_user:
+                return
+            scope_status, organization_id, scope_error = resolve_admin_organization_id(
+                admin_user,
+                data.get("organization_id"),
+            )
+            if scope_error:
+                self.send_json(scope_error, status=scope_status)
                 return
             try:
                 user_id = int(data.get("user_id"))
@@ -4494,7 +4616,7 @@ class ConsultaHandler(SimpleHTTPRequestHandler):
             status, response = assign_user_manager(
                 user_id,
                 manager_id,
-                admin_user["organization_id"],
+                organization_id,
             )
             self.send_json(response, status=status)
             return
