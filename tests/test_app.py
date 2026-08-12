@@ -744,6 +744,45 @@ class DataUploadTest(unittest.TestCase):
         )
 
 
+class ControlAdminScopeTest(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_auth_db_path = app.AUTH_DB_PATH
+        self.original_admin_password = os.environ.get("ADMIN_PASSWORD")
+        os.environ["ADMIN_PASSWORD"] = "Senha1234"
+        app.AUTH_DB_PATH = Path(self.temp_dir.name) / "auth.sqlite3"
+        app.initialize_auth_database()
+
+    def tearDown(self):
+        app.AUTH_DB_PATH = self.original_auth_db_path
+        if self.original_admin_password is None:
+            os.environ.pop("ADMIN_PASSWORD", None)
+        else:
+            os.environ["ADMIN_PASSWORD"] = self.original_admin_password
+        self.temp_dir.cleanup()
+
+    def test_control_can_resolve_any_company_but_admin_cannot(self):
+        with app.open_auth_db() as conn:
+            control = app.public_user(app.fetch_user_by_id(conn, 1))
+            cursor = conn.execute(
+                "INSERT INTO organizations (nome, slug, status, data_criacao) VALUES (?, ?, 'ATIVA', ?)",
+                ("Empresa B", "empresa-b", app.utc_iso()),
+            )
+            organization_b_id = cursor.lastrowid
+            conn.commit()
+
+        status, resolved_id, error = app.resolve_admin_organization_id(control, organization_b_id)
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertEqual(resolved_id, organization_b_id)
+        self.assertIsNone(error)
+
+        company_admin = {**control, "id": 99, "perfil": "ADMIN", "is_platform_admin": False, "organization_id": 1}
+        status, resolved_id, error = app.resolve_admin_organization_id(company_admin, organization_b_id)
+        self.assertEqual(status, app.HTTPStatus.OK)
+        self.assertEqual(resolved_id, 1)
+        self.assertIsNone(error)
+
+
 class SearchHistoryTest(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()

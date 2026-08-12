@@ -16,6 +16,8 @@ const adminRefreshButton = document.querySelector("#adminRefreshButton");
 const adminUsersBody = document.querySelector("#adminUsersBody");
 const adminUsersCount = document.querySelector("#adminUsersCount");
 const adminMessage = document.querySelector("#adminMessage");
+const adminOrganizationSwitcher = document.querySelector("#adminOrganizationSwitcher");
+const adminOrganizationFilter = document.querySelector("#adminOrganizationFilter");
 const teamForm = document.querySelector("#teamForm");
 const teamNameInput = document.querySelector("#teamNameInput");
 const teamMessage = document.querySelector("#teamMessage");
@@ -35,6 +37,53 @@ const brandingLogoPreview = document.querySelector("#brandingLogoPreview");
 const sidebarToggleAuth = document.querySelector("#sidebarToggle");
 const registerOrganization = document.querySelector("#registerOrganization");
 const toggleLoginPassword = document.querySelector("#toggleLoginPassword");
+
+let adminOrganizationOptions = [];
+
+function selectedAdminOrganizationId() {
+  return adminOrganizationFilter?.value || "";
+}
+
+function adminScopedUrl(path) {
+  const organizationId = selectedAdminOrganizationId();
+  if (!organizationId) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}organization_id=${encodeURIComponent(organizationId)}`;
+}
+
+function adminScopedPayload(payload = {}) {
+  const organizationId = selectedAdminOrganizationId();
+  return organizationId ? { ...payload, organization_id: Number(organizationId) } : payload;
+}
+
+function renderAdminOrganizationOptions(organizations, selectedId = "") {
+  if (!adminOrganizationFilter) return;
+  adminOrganizationOptions = organizations || [];
+  adminOrganizationFilter.replaceChildren();
+  adminOrganizationOptions.forEach((organization) => {
+    const statusSuffix = organization.status === "ATIVA" ? "" : ` · ${String(organization.status || "").toLowerCase()}`;
+    adminOrganizationFilter.add(new Option(`${organization.nome}${statusSuffix}`, String(organization.id)));
+  });
+  adminOrganizationFilter.value = String(selectedId || adminOrganizationOptions[0]?.id || "");
+}
+
+async function loadAdminOrganizations() {
+  if (!adminOrganizationSwitcher || !adminOrganizationFilter) return;
+  const response = await fetch("/api/platform/organizations", { cache: "no-store" });
+  if (response.status === 403) return;
+  const data = await response.json();
+  if (!response.ok || !Array.isArray(data.organizations)) {
+    throw new Error(data.message || "Não foi possível carregar as empresas.");
+  }
+  renderAdminOrganizationOptions(data.organizations, data.current_organization_id);
+  adminOrganizationSwitcher.hidden = false;
+}
+
+function refreshAdminBrandingPreview() {
+  if (!brandingLogoPreview) return;
+  const url = adminScopedUrl("/api/branding/logo");
+  brandingLogoPreview.src = `${url}${url.includes("?") ? "&" : "?"}v=${Date.now()}`;
+}
 
 async function loadRegistrationOrganizations() {
   if (!registerOrganization) return;
@@ -341,7 +390,7 @@ function renderTeams() {
 }
 
 async function loadTeams() {
-  const response = await fetch("/api/admin/teams", { cache: "no-store" });
+  const response = await fetch(adminScopedUrl("/api/admin/teams"), { cache: "no-store" });
   const data = await response.json();
   if (!response.ok) throw new Error(data.message || "Não foi possível carregar as equipes.");
   adminTeams = data.teams || [];
@@ -350,7 +399,10 @@ async function loadTeams() {
 
 async function assignTeam(userId, teamId, select) {
   select.disabled = true;
-  const { response, data } = await postJson("/api/admin/users/team", { user_id: userId, equipe_id: teamId });
+  const { response, data } = await postJson(
+    "/api/admin/users/team",
+    adminScopedPayload({ user_id: userId, equipe_id: teamId }),
+  );
   showAuthMessage(data.message, response.ok ? "success" : "error", adminMessage);
   select.disabled = false;
   if (response.ok) await refreshAdminManagement();
@@ -359,10 +411,10 @@ async function assignTeam(userId, teamId, select) {
 
 async function assignProfile(userId, profile, select) {
   select.disabled = true;
-  const { response, data } = await postJson("/api/admin/users/profile", {
-    user_id: userId,
-    perfil: profile,
-  });
+  const { response, data } = await postJson(
+    "/api/admin/users/profile",
+    adminScopedPayload({ user_id: userId, perfil: profile }),
+  );
   showAuthMessage(data.message, response.ok ? "success" : "error", adminMessage);
   select.disabled = false;
   await loadAdminUsers();
@@ -370,10 +422,10 @@ async function assignProfile(userId, profile, select) {
 
 async function assignManager(userId, managerId, select) {
   select.disabled = true;
-  const { response, data } = await postJson("/api/admin/users/manager", {
-    user_id: userId,
-    gestor_id: managerId,
-  });
+  const { response, data } = await postJson(
+    "/api/admin/users/manager",
+    adminScopedPayload({ user_id: userId, gestor_id: managerId }),
+  );
   showAuthMessage(data.message, response.ok ? "success" : "error", adminMessage);
   select.disabled = false;
   await loadAdminUsers();
@@ -455,7 +507,11 @@ async function loadAdminUsers() {
   if (adminSearchInput?.value) params.set("search", adminSearchInput.value);
   if (adminStatusFilter?.value) params.set("status", adminStatusFilter.value);
 
-  const response = await fetch(`/api/admin/users?${params.toString()}`, { cache: "no-store" });
+  const query = params.toString();
+  const response = await fetch(
+    adminScopedUrl(`/api/admin/users${query ? `?${query}` : ""}`),
+    { cache: "no-store" },
+  );
   const data = await response.json();
   if (!response.ok) {
     showAuthMessage(data.message || "Não foi possível carregar usuários.", "error", adminMessage);
@@ -467,10 +523,10 @@ async function loadAdminUsers() {
 
 async function runUserAction(userId, action) {
   hideAuthMessage(adminMessage);
-  const { response, data } = await postJson("/api/admin/users/action", {
-    user_id: userId,
-    action,
-  });
+  const { response, data } = await postJson(
+    "/api/admin/users/action",
+    adminScopedPayload({ user_id: userId, action }),
+  );
   showAuthMessage(data.message || "Ação concluída.", response.ok ? "success" : "error", adminMessage);
   if (response.ok) {
     await loadAdminUsers();
@@ -495,7 +551,7 @@ dataUploadForm?.addEventListener("submit", async (event) => {
     showAuthMessage(`Enviando ${files.length} arquivo(s) e identificando as bases...`, "success", dataUploadMessage);
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file, file.name));
-    const response = await fetch("/api/admin/data/upload?refresh=1", {
+    const response = await fetch(adminScopedUrl("/api/admin/data/upload?refresh=1"), {
       method: "POST",
       body: formData,
     });
@@ -545,7 +601,7 @@ brandingLogoForm?.addEventListener("submit", async (event) => {
 
   brandingLogoButton.disabled = true;
   try {
-    const response = await fetch("/api/admin/branding/logo", {
+    const response = await fetch(adminScopedUrl("/api/admin/branding/logo"), {
       method: "POST",
       headers: { "Content-Type": file.type || "application/octet-stream" },
       body: file,
@@ -554,7 +610,7 @@ brandingLogoForm?.addEventListener("submit", async (event) => {
     if (!response.ok) {
       throw new Error(data.message || "Não foi possível atualizar a logo.");
     }
-    const logoUrl = data.logo_url || `/api/branding/logo?v=${Date.now()}`;
+    const logoUrl = data.logo_url || `${adminScopedUrl("/api/branding/logo")}${adminScopedUrl("/api/branding/logo").includes("?") ? "&" : "?"}v=${Date.now()}`;
     if (brandingLogoPreview) brandingLogoPreview.src = logoUrl;
     document.querySelectorAll(".brand-logo").forEach((logo) => {
       logo.src = logoUrl;
@@ -698,12 +754,19 @@ adminSearchInput?.addEventListener("input", () => {
 });
 adminStatusFilter?.addEventListener("change", loadAdminUsers);
 adminRefreshButton?.addEventListener("click", loadAdminUsers);
+adminOrganizationFilter?.addEventListener("change", async () => {
+  refreshAdminBrandingPreview();
+  await refreshAdminManagement();
+});
 
 teamForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   hideAuthMessage(teamMessage);
   setSubmitLoading(teamForm, true);
-  const { response, data } = await postJson("/api/admin/teams", { nome: teamNameInput.value });
+  const { response, data } = await postJson(
+    "/api/admin/teams",
+    adminScopedPayload({ nome: teamNameInput.value }),
+  );
   setSubmitLoading(teamForm, false);
   showAuthMessage(data.message, response.ok ? "success" : "error", teamMessage);
   if (response.ok) {
@@ -723,7 +786,11 @@ document.addEventListener("keydown", (event) => {
 });
 
 if (adminUsersBody) {
-  refreshAdminManagement().catch((error) => showAuthMessage(error.message, "error", adminMessage));
+  (async () => {
+    await loadAdminOrganizations();
+    refreshAdminBrandingPreview();
+    await refreshAdminManagement();
+  })().catch((error) => showAuthMessage(error.message, "error", adminMessage));
 }
 
 validateEmailLink();
