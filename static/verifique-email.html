@@ -24,9 +24,22 @@
         <p>
           Após confirmar o e-mail, seu cadastro ficará disponível para aprovação do administrador.
         </p>
-        <button id="resendVerificationButton" class="ghost-button" type="button">
-          Reenviar e-mail
-        </button>
+        <form id="resendVerificationForm" class="auth-form verification-resend-form">
+          <label>
+            <span>Seu e-mail de cadastro</span>
+            <input
+              id="resendVerificationEmail"
+              name="email"
+              type="email"
+              autocomplete="email"
+              placeholder="nome@empresa.com.br"
+              required
+            />
+          </label>
+          <button id="resendVerificationSubmit" class="ghost-button" type="submit">
+            Reenviar e-mail de confirmação
+          </button>
+        </form>
         <p id="emailVerificationMessage" class="auth-message" aria-live="polite" hidden></p>
         <a class="text-link" href="/login">Voltar para login</a>
       </section>

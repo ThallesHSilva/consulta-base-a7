@@ -1810,6 +1810,16 @@ svg rect {
   justify-content: flex-end;
 }
 
+.verification-resend-form {
+  width: min(100%, 28rem);
+  margin-top: 0.35rem;
+  padding-top: 0.2rem;
+}
+
+.verification-resend-form .ghost-button {
+  width: 100%;
+}
+
 .text-link {
   width: fit-content;
   color: var(--purple-dark);
@@ -2705,6 +2715,22 @@ svg rect {
 .login-card-footer a {
   color: var(--purple-dark);
   font-weight: 800;
+}
+
+.login-verification-link {
+  display: block;
+  width: fit-content;
+  margin: 0.9rem auto 0;
+  color: #686c7d;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.login-verification-link:hover {
+  color: var(--purple-dark);
+  text-decoration: underline;
+  text-underline-offset: 0.18rem;
 }
 
 .login-support {
