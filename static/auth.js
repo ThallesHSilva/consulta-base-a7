@@ -5,6 +5,9 @@ const forgotPasswordForm = document.querySelector("#forgotPasswordForm");
 const resetPasswordForm = document.querySelector("#resetPasswordForm");
 const pendingMessage = document.querySelector("#pendingMessage");
 const resendVerificationButton = document.querySelector("#resendVerificationButton");
+const resendVerificationForm = document.querySelector("#resendVerificationForm");
+const resendVerificationEmail = document.querySelector("#resendVerificationEmail");
+const resendVerificationSubmit = document.querySelector("#resendVerificationSubmit");
 const emailVerificationMessage = document.querySelector("#emailVerificationMessage");
 const confirmEmailBadge = document.querySelector("#confirmEmailBadge");
 const confirmEmailTitle = document.querySelector("#confirmEmailTitle");
@@ -676,19 +679,29 @@ registerForm?.addEventListener("submit", async (event) => {
   window.location.href = "/verifique-email";
 });
 
-resendVerificationButton?.addEventListener("click", async () => {
-  const email = sessionStorage.getItem("verificationEmail")
-    || document.querySelector("#loginEmail")?.value
-    || "";
+async function resendEmailVerification(email, button) {
   const target = emailVerificationMessage || authMessage;
   if (!email) {
     showAuthMessage("Informe o e-mail usado no cadastro.", "error", target);
     return;
   }
-  resendVerificationButton.disabled = true;
+  button.disabled = true;
   const { data } = await postJson("/api/auth/email/resend", { email });
-  resendVerificationButton.disabled = false;
+  button.disabled = false;
+  sessionStorage.setItem("verificationEmail", email);
   showAuthMessage(data.message, "success", target);
+}
+
+resendVerificationButton?.addEventListener("click", async () => {
+  const email = sessionStorage.getItem("verificationEmail")
+    || document.querySelector("#loginEmail")?.value
+    || "";
+  await resendEmailVerification(email.trim(), resendVerificationButton);
+});
+
+resendVerificationForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await resendEmailVerification(resendVerificationEmail?.value.trim() || "", resendVerificationSubmit);
 });
 
 async function validateEmailLink() {
@@ -745,6 +758,10 @@ if (pendingMessage) {
     pendingMessage.textContent = storedMessage;
     sessionStorage.removeItem("pendingMessage");
   }
+}
+
+if (resendVerificationEmail) {
+  resendVerificationEmail.value = sessionStorage.getItem("verificationEmail") || "";
 }
 
 let adminSearchTimer = 0;
