@@ -3474,11 +3474,11 @@ def send_transactional_email(
         smtp_user = os.environ.get("SMTP_USER")
         smtp_password = os.environ.get("SMTP_PASSWORD")
         use_tls = os.environ.get("SMTP_TLS", "1") != "0"
-        use_smtp_auth = os.environ.get("SMTP_AUTH", "auto").strip().lower() not in {
-            "0",
-            "false",
-            "no",
-            "off",
+        use_smtp_auth = os.environ.get("SMTP_AUTH", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
         }
         with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
             if use_tls:

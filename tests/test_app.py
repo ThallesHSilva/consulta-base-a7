@@ -12,12 +12,12 @@ import app
 
 
 class SmtpAuthenticationTest(unittest.TestCase):
-    def test_can_disable_smtp_authentication_for_relay(self):
+    def test_only_uses_smtp_authentication_when_explicitly_enabled(self):
         environment = {
             "SMTP_HOST": "smtp-relay.gmail.com",
             "SMTP_PORT": "587",
             "SMTP_TLS": "1",
-            "SMTP_AUTH": "0",
+            "SMTP_AUTH": "auto",
             "SMTP_USER": "legacy-user",
             "SMTP_PASSWORD": "legacy-password",
             "SMTP_FROM": "contato@mail.tifacilbrasil.com.br",
