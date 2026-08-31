@@ -26,6 +26,7 @@ services:
       - SMTP_PASSWORD=${SMTP_PASSWORD:-}
       - SMTP_FROM=${SMTP_FROM:-}
       - SMTP_TLS=${SMTP_TLS:-1}
+      - SMTP_AUTH=${SMTP_AUTH:-auto}
 
 volumes:
   app-data:

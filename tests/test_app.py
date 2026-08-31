@@ -6,8 +6,34 @@ import tempfile
 import unittest
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 import app
+
+
+class SmtpAuthenticationTest(unittest.TestCase):
+    def test_can_disable_smtp_authentication_for_relay(self):
+        environment = {
+            "SMTP_HOST": "smtp-relay.gmail.com",
+            "SMTP_PORT": "587",
+            "SMTP_TLS": "1",
+            "SMTP_AUTH": "0",
+            "SMTP_USER": "legacy-user",
+            "SMTP_PASSWORD": "legacy-password",
+            "SMTP_FROM": "contato@mail.tifacilbrasil.com.br",
+        }
+        with patch.dict(os.environ, environment, clear=True), patch("app.smtplib.SMTP") as smtp_factory:
+            smtp = smtp_factory.return_value.__enter__.return_value
+            app.send_transactional_email(
+                "destinatario@example.com",
+                "Teste",
+                "Corpo do e-mail",
+                "test_outbox",
+            )
+
+        smtp.starttls.assert_called_once()
+        smtp.login.assert_not_called()
+        smtp.send_message.assert_called_once()
 
 
 class CnpjNormalizationTest(unittest.TestCase):
